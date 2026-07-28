@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { callAI, getDefaultAIConfig } from "@/lib/ai/provider";
 import { db } from "@/db";
-import { aiConfig } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { aiConfig, ejecuciones, asignaciones, conflictos, docentes, materiasCatalogo, espacios } from "@/db/schema";
+import { eq, desc, count } from "drizzle-orm";
 import type { AIMessage, AIProviderConfig } from "@/types/scheduler";
 
 const SYSTEM_PROMPT = `Eres el asistente de IA del sistema SPAH (Sistema de Programación Automática de Horarios).
@@ -13,7 +13,6 @@ Tu rol es ayudar al administrador académico con:
 3. Recomendar redistribuciones para mejorar el horario
 4. Responder consultas sobre la configuración del scheduler
 
-Contexto: El sistema asigna horarios a una universidad usando un algoritmo Greedy + Backtracking.
 Restricciones duras (HC) que nunca se violan:
 - HC-01: Sin solapamiento de docente
 - HC-02: Sin solapamiento de espacio
@@ -28,7 +27,7 @@ Restricciones duras (HC) que nunca se violan:
 - HC-12: No usar espacios reservados externamente
 - HC-13: Docente no puede dictar 2 materias al mismo paralelo
 
-Responde en español, sé conciso y técnico.`;
+Responde en español, sé conciso y técnico. Usa los datos del contexto actual que se te proporcionan.`;
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -37,26 +36,14 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { messages, provider: requestProvider, context } = await req.json();
+    const { messages, provider: requestProvider } = await req.json();
 
-    // Get AI config (from DB or env)
+    // Get AI config
     let config: AIProviderConfig;
-
     if (requestProvider) {
-      // Use specific provider from request
-      const [dbConfig] = await db
-        .select()
-        .from(aiConfig)
-        .where(eq(aiConfig.provider, requestProvider))
-        .limit(1);
-
+      const [dbConfig] = await db.select().from(aiConfig).where(eq(aiConfig.provider, requestProvider)).limit(1);
       if (dbConfig) {
-        config = {
-          provider: dbConfig.provider as any,
-          apiKey: dbConfig.apiKey || undefined,
-          baseUrl: dbConfig.baseUrl || undefined,
-          model: dbConfig.model,
-        };
+        config = { provider: dbConfig.provider as any, apiKey: dbConfig.apiKey || undefined, baseUrl: dbConfig.baseUrl || undefined, model: dbConfig.model };
       } else {
         config = getDefaultAIConfig();
       }
@@ -64,19 +51,75 @@ export async function POST(req: NextRequest) {
       config = getDefaultAIConfig();
     }
 
-    // Build messages with system prompt and context
-    const aiMessages: AIMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT },
-    ];
+    // ─── GATHER REAL CONTEXT FROM DATABASE ────────────────────────────────
+    const [lastExec] = await db.select().from(ejecuciones).orderBy(desc(ejecuciones.createdAt)).limit(1);
 
-    if (context) {
-      aiMessages.push({
-        role: "system",
-        content: `Datos del contexto actual:\n${JSON.stringify(context, null, 2)}`,
-      });
+    let contextData: any = { mensaje: "No hay ejecuciones registradas aún." };
+
+    if (lastExec) {
+      // Get assignments summary
+      const asigs = await db.select().from(asignaciones).where(eq(asignaciones.ejecucionId, lastExec.id));
+      const confs = await db.select().from(conflictos).where(eq(conflictos.ejecucionId, lastExec.id));
+
+      // Group by carrera/semester
+      const byCarrera: Record<string, number> = {};
+      const bySemestre: Record<string, number> = {};
+      const byDocente: Record<string, number> = {};
+      const conflictosPorSemestre: Record<string, any[]> = {};
+
+      for (const a of asigs) {
+        byCarrera[a.carrera] = (byCarrera[a.carrera] || 0) + 1;
+        bySemestre[a.semestre] = (bySemestre[a.semestre] || 0) + 1;
+        const docKey = a.docenteNombre || "Sin Docente";
+        byDocente[docKey] = (byDocente[docKey] || 0) + 1;
+      }
+
+      for (const c of confs) {
+        const sem = c.semestre || "N/A";
+        if (!conflictosPorSemestre[sem]) conflictosPorSemestre[sem] = [];
+        conflictosPorSemestre[sem].push({ codigo: c.materiaCodigo, nombre: c.materiaNombre, grupo: c.grupoCodigo, motivo: c.motivo });
+      }
+
+      // Count totals from DB
+      const [docenteCount] = await db.select({ count: count() }).from(docentes);
+      const [materiaCount] = await db.select({ count: count() }).from(materiasCatalogo);
+      const [espacioCount] = await db.select({ count: count() }).from(espacios);
+
+      contextData = {
+        ultimaEjecucion: {
+          id: lastExec.id,
+          gestion: lastExec.gestion,
+          fecha: lastExec.createdAt.toISOString(),
+          totalAsignadas: lastExec.totalAsignadas,
+          totalConflictos: lastExec.totalConflictos,
+          totalAIR: lastExec.totalAIR,
+          totalSinDocente: lastExec.totalSinDocente,
+          duracionMs: lastExec.duracionMs,
+        },
+        resumenGeneral: {
+          totalDocentes: docenteCount.count,
+          totalMaterias: materiaCount.count,
+          totalEspacios: espacioCount.count,
+        },
+        asignadasPorCarrera: byCarrera,
+        asignadasPorSemestre: bySemestre,
+        cargaPorDocente: byDocente,
+        conflictosPorSemestre,
+        sesionesAIR: asigs.filter(a => a.esAIR).map(a => ({
+          codigo: a.materiaCodigo, nombre: a.materiaNombre, grupo: a.grupoCodigo, dia: a.dia, horario: (a.slots as string[]).join("-")
+        })),
+        sesionesSinDocente: asigs.filter(a => a.esSinDocente).map(a => ({
+          codigo: a.materiaCodigo, nombre: a.materiaNombre, grupo: a.grupoCodigo, espacio: a.espacioCodigo, dia: a.dia
+        })),
+      };
     }
 
-    // Add user conversation
+    // Build messages
+    const aiMessages: AIMessage[] = [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: `DATOS ACTUALES DEL SISTEMA (consulta la base de datos en tiempo real):\n${JSON.stringify(contextData, null, 2)}` },
+    ];
+
     for (const msg of messages) {
       aiMessages.push({ role: msg.role, content: msg.content });
     }
@@ -92,9 +135,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: any) {
     console.error("AI chat error:", error);
-    return NextResponse.json(
-      { error: `Error de IA: ${error.message}` },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: `Error de IA: ${error.message}` }, { status: 500 });
   }
 }
