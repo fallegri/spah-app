@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Download, Calendar, AlertTriangle, Users, Filter } from "lucide-react";
+import { Download, Calendar, AlertTriangle, Building, GraduationCap, Filter, List } from "lucide-react";
 
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const SLOTS = ["07:45","08:30","09:15","10:00","10:45","11:30","12:15","13:00","13:45","14:30","15:15","16:00","16:45","17:30","18:15","19:00","19:45","20:30","21:15","22:00","22:45"];
@@ -23,16 +23,14 @@ interface Props {
 
 export function ResultsClient({ data }: Props) {
   const { ejecucion, asignaciones, conflictos } = data;
-  const [filterCarrera, setFilterCarrera] = useState("todas");
-  const [filterTurno, setFilterTurno] = useState("todos");
-  const [tab, setTab] = useState<"grilla" | "lista" | "conflictos">("grilla");
+  const [tab, setTab] = useState<"semestre" | "espacio" | "lista" | "conflictos">("semestre");
+  const [selectedCarrera, setSelectedCarrera] = useState("todas");
+  const [selectedSemestre, setSelectedSemestre] = useState("todos");
+  const [selectedEspacio, setSelectedEspacio] = useState("todos");
 
   const carreras = [...new Set(asignaciones.map((a) => a.carrera))].sort();
-  const filtered = asignaciones.filter((a) => {
-    if (filterCarrera !== "todas" && a.carrera !== filterCarrera) return false;
-    if (filterTurno !== "todos" && a.turno !== filterTurno) return false;
-    return true;
-  });
+  const semestres = [...new Set(asignaciones.map((a) => a.semestre))].sort();
+  const espaciosUsados = [...new Set(asignaciones.map((a) => a.espacioCodigo))].sort();
 
   const handleExport = () => {
     window.open(`/api/export?id=${ejecucion.id}`, "_blank");
@@ -48,10 +46,7 @@ export function ResultsClient({ data }: Props) {
             Ejecucion #{ejecucion.id} · {new Date(ejecucion.createdAt).toLocaleString("es")} · {ejecucion.gestion}
           </p>
         </div>
-        <button
-          onClick={handleExport}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-sm text-white"
-        >
+        <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-sm text-white">
           <Download className="w-4 h-4" /> Descargar Excel
         </button>
       </div>
@@ -66,8 +61,13 @@ export function ResultsClient({ data }: Props) {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 border-b border-gray-800 pb-0">
-        {([["grilla", "Grilla horaria", Calendar], ["lista", "Lista completa", Users], ["conflictos", "Conflictos", AlertTriangle]] as const).map(([key, label, Icon]) => (
+      <div className="flex items-center gap-1 border-b border-gray-800">
+        {([
+          ["semestre", "Por Semestre", GraduationCap],
+          ["espacio", "Por Espacio", Building],
+          ["lista", "Lista completa", List],
+          ["conflictos", "Conflictos", AlertTriangle],
+        ] as const).map(([key, label, Icon]) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -83,69 +83,221 @@ export function ResultsClient({ data }: Props) {
         ))}
       </div>
 
-      {/* Filters */}
-      {tab !== "conflictos" && (
-        <div className="flex items-center gap-3">
-          <Filter className="w-4 h-4 text-gray-500" />
-          <select value={filterCarrera} onChange={(e) => setFilterCarrera(e.target.value)} className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white">
-            <option value="todas">Todas las carreras</option>
-            {carreras.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select value={filterTurno} onChange={(e) => setFilterTurno(e.target.value)} className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white">
-            <option value="todos">Todos los turnos</option>
-            <option value="Mañana">Mañana</option>
-            <option value="Tarde">Tarde</option>
-            <option value="Noche">Noche</option>
-          </select>
-          <span className="text-xs text-gray-500">{filtered.length} sesiones</span>
-        </div>
+      {/* Tab Content */}
+      {tab === "semestre" && (
+        <SemestreView
+          asignaciones={asignaciones}
+          carreras={carreras}
+          semestres={semestres}
+          selectedCarrera={selectedCarrera}
+          setSelectedCarrera={setSelectedCarrera}
+          selectedSemestre={selectedSemestre}
+          setSelectedSemestre={setSelectedSemestre}
+        />
       )}
-
-      {/* Content */}
-      {tab === "grilla" && <GridView asignaciones={filtered} />}
-      {tab === "lista" && <ListView asignaciones={filtered} />}
+      {tab === "espacio" && (
+        <EspacioView
+          asignaciones={asignaciones}
+          espacios={espaciosUsados}
+          selectedEspacio={selectedEspacio}
+          setSelectedEspacio={setSelectedEspacio}
+        />
+      )}
+      {tab === "lista" && <ListView asignaciones={asignaciones} />}
       {tab === "conflictos" && <ConflictosView conflictos={conflictos} />}
     </div>
   );
 }
 
-function GridView({ asignaciones }: { asignaciones: Asig[] }) {
+// ─── VIEW: POR SEMESTRE ─────────────────────────────────────────────────────
+
+function SemestreView({
+  asignaciones, carreras, semestres, selectedCarrera, setSelectedCarrera, selectedSemestre, setSelectedSemestre,
+}: {
+  asignaciones: Asig[]; carreras: string[]; semestres: string[];
+  selectedCarrera: string; setSelectedCarrera: (v: string) => void;
+  selectedSemestre: string; setSelectedSemestre: (v: string) => void;
+}) {
+  // Filter
+  let filtered = asignaciones;
+  if (selectedCarrera !== "todas") filtered = filtered.filter((a) => a.carrera === selectedCarrera);
+  if (selectedSemestre !== "todos") filtered = filtered.filter((a) => a.semestre === selectedSemestre);
+
+  // Group by carrera + semestre
+  const groups = new Map<string, Asig[]>();
+  for (const a of filtered) {
+    const key = `${a.carrera} — ${a.semestre}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(a);
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="flex items-center gap-3">
+        <Filter className="w-4 h-4 text-gray-500" />
+        <select value={selectedCarrera} onChange={(e) => setSelectedCarrera(e.target.value)} className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white">
+          <option value="todas">Todas las carreras</option>
+          {carreras.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={selectedSemestre} onChange={(e) => setSelectedSemestre(e.target.value)} className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white">
+          <option value="todos">Todos los semestres</option>
+          {semestres.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <span className="text-xs text-gray-500">{filtered.length} sesiones en {groups.size} grupos</span>
+      </div>
+
+      {/* One grid per group */}
+      {Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([groupName, asigs]) => (
+        <div key={groupName} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 bg-gray-800/50 border-b border-gray-800">
+            <h3 className="text-sm font-semibold text-white">{groupName}</h3>
+            <p className="text-[11px] text-gray-400">{asigs.length} sesiones · Grupo: {asigs[0]?.grupoCodigo}</p>
+          </div>
+          <div className="p-3">
+            <TimetableGrid asignaciones={asigs} showDocente={true} />
+          </div>
+        </div>
+      ))}
+
+      {groups.size === 0 && (
+        <div className="text-center py-8 text-gray-500">No hay asignaciones con los filtros seleccionados.</div>
+      )}
+    </div>
+  );
+}
+
+// ─── VIEW: POR ESPACIO ──────────────────────────────────────────────────────
+
+function EspacioView({
+  asignaciones, espacios, selectedEspacio, setSelectedEspacio,
+}: {
+  asignaciones: Asig[]; espacios: string[];
+  selectedEspacio: string; setSelectedEspacio: (v: string) => void;
+}) {
+  // If "todos", show one grid per espacio
+  const espaciosToShow = selectedEspacio === "todos" ? espacios : [selectedEspacio];
+
+  return (
+    <div className="space-y-4">
+      {/* Filter */}
+      <div className="flex items-center gap-3">
+        <Building className="w-4 h-4 text-gray-500" />
+        <select value={selectedEspacio} onChange={(e) => setSelectedEspacio(e.target.value)} className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white">
+          <option value="todos">Todos los espacios ({espacios.length})</option>
+          {espacios.map((e) => <option key={e} value={e}>{e}</option>)}
+        </select>
+      </div>
+
+      {/* One grid per espacio */}
+      {espaciosToShow.map((espacio) => {
+        const asigs = asignaciones.filter((a) => a.espacioCodigo === espacio);
+        if (asigs.length === 0) return null;
+
+        // Determine tipo from first assignment
+        const tipo = asigs[0].tipoEspacio;
+        const tipoColor = tipo === "LABORATORIO" ? "text-blue-400" : tipo === "TALLER" ? "text-purple-400" : "text-gray-300";
+
+        return (
+          <div key={espacio} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 bg-gray-800/50 border-b border-gray-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-white">{espacio}</h3>
+                <p className="text-[11px] text-gray-400">{asigs.length} sesiones programadas</p>
+              </div>
+              <span className={`text-xs font-medium ${tipoColor}`}>{tipo}</span>
+            </div>
+            <div className="p-3">
+              <TimetableGrid asignaciones={asigs} showDocente={false} showCarrera={true} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── SHARED TIMETABLE GRID ──────────────────────────────────────────────────
+
+function TimetableGrid({ asignaciones, showDocente = false, showCarrera = false }: { asignaciones: Asig[]; showDocente?: boolean; showCarrera?: boolean }) {
+  // Determine which slots have data to avoid showing empty rows
+  const usedSlots = new Set<string>();
+  for (const a of asignaciones) {
+    for (const s of a.slots) usedSlots.add(s);
+  }
+  const visibleSlots = SLOTS.filter((s) => usedSlots.has(s));
+
+  if (visibleSlots.length === 0) {
+    return <p className="text-xs text-gray-500 text-center py-4">Sin sesiones asignadas.</p>;
+  }
+
   const getAsigAt = (dia: string, slot: string) =>
     asignaciones.filter((a) => a.dia === dia && a.slots.includes(slot));
 
+  // Track which cells are already rendered (for spanning)
+  const rendered = new Set<string>();
+
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 overflow-x-auto">
+    <div className="overflow-x-auto">
       <table className="w-full text-xs border-collapse">
         <thead>
           <tr>
-            <th className="px-2 py-2 text-left text-gray-500 font-medium w-16">Hora</th>
-            {DIAS.map((d) => <th key={d} className="px-2 py-2 text-center text-gray-400 font-medium">{d.slice(0, 3)}</th>)}
+            <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-14 border-b border-gray-800">Hora</th>
+            {DIAS.map((d) => (
+              <th key={d} className="px-2 py-1.5 text-center text-gray-400 font-medium border-b border-gray-800 min-w-[120px]">{d}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {SLOTS.map((slot, idx) => (
-            <tr key={slot} className={idx === 7 || idx === 14 ? "border-t-2 border-gray-700" : ""}>
-              <td className="px-2 py-1 text-gray-600 font-mono text-[10px] align-top">{slot}</td>
+          {visibleSlots.map((slot, idx) => (
+            <tr key={slot}>
+              <td className="px-2 py-1 text-gray-600 font-mono text-[10px] border-r border-gray-800 align-top">{slot}</td>
               {DIAS.map((dia) => {
+                const cellKey = `${dia}|${slot}`;
+                if (rendered.has(cellKey)) return null;
+
                 const cells = getAsigAt(dia, slot);
+                if (cells.length === 0) {
+                  return <td key={cellKey} className="px-1 py-0.5 border-b border-gray-800/50" />;
+                }
+
                 return (
-                  <td key={`${dia}-${slot}`} className="px-0.5 py-0.5 align-top">
-                    {cells.map((a) => (
-                      <div
-                        key={a.id}
-                        className={`px-1.5 py-1 rounded text-[10px] leading-tight mb-0.5 ${
-                          a.esAIR ? "bg-amber-900/30 border border-amber-700 text-amber-300" :
-                          a.esSinDocente ? "bg-orange-900/30 border border-orange-700 text-orange-300" :
-                          a.tipoEspacio === "LABORATORIO" ? "bg-blue-900/30 border border-blue-800 text-blue-300" :
-                          a.tipoEspacio === "TALLER" ? "bg-purple-900/30 border border-purple-800 text-purple-300" :
-                          "bg-gray-800 border border-gray-700 text-gray-300"
-                        }`}
-                        title={`${a.materiaNombre}\n${a.docenteNombre}\n${a.espacioCodigo}`}
-                      >
-                        <div className="font-semibold truncate">{a.materiaCodigo}</div>
-                        <div className="text-[9px] opacity-75 truncate">{a.espacioCodigo}</div>
-                      </div>
-                    ))}
+                  <td key={cellKey} className="px-1 py-0.5 align-top border-b border-gray-800/50">
+                    {cells.map((a) => {
+                      // Only show on first slot of the session
+                      if (a.slots[0] !== slot) return null;
+
+                      // Mark remaining slots as rendered
+                      for (const s of a.slots.slice(1)) {
+                        rendered.add(`${dia}|${s}`);
+                      }
+
+                      const height = a.slots.length;
+
+                      return (
+                        <div
+                          key={a.id}
+                          className={`px-2 py-1.5 rounded text-[10px] leading-tight mb-0.5 ${
+                            a.esAIR ? "bg-amber-900/40 border border-amber-700/60 text-amber-200" :
+                            a.esSinDocente ? "bg-orange-900/40 border border-orange-700/60 text-orange-200" :
+                            a.tipoEspacio === "LABORATORIO" ? "bg-blue-900/30 border border-blue-800/60 text-blue-200" :
+                            a.tipoEspacio === "TALLER" ? "bg-purple-900/30 border border-purple-800/60 text-purple-200" :
+                            "bg-gray-800 border border-gray-700 text-gray-200"
+                          }`}
+                          style={{ minHeight: `${height * 24}px` }}
+                        >
+                          <div className="font-bold">{a.materiaCodigo}</div>
+                          <div className="truncate opacity-80">{a.materiaNombre}</div>
+                          {showDocente && <div className="text-[9px] opacity-70 mt-0.5">👤 {a.docenteNombre}</div>}
+                          {showCarrera && <div className="text-[9px] opacity-70 mt-0.5">📚 {a.carrera.split(" ").slice(0,3).join(" ")}</div>}
+                          <div className="text-[9px] opacity-60 mt-0.5">
+                            {!showCarrera && `📍 ${a.espacioCodigo}`}
+                            {showCarrera && `👤 ${a.docenteNombre?.split(" ").slice(0,2).join(" ")}`}
+                            {` · ${a.slots[0]}-${a.slots[a.slots.length-1]}`}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </td>
                 );
               })}
@@ -157,6 +309,8 @@ function GridView({ asignaciones }: { asignaciones: Asig[] }) {
   );
 }
 
+// ─── VIEW: LISTA ────────────────────────────────────────────────────────────
+
 function ListView({ asignaciones }: { asignaciones: Asig[] }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -166,6 +320,7 @@ function ListView({ asignaciones }: { asignaciones: Asig[] }) {
             <th className="px-3 py-2.5 text-left text-gray-400">Codigo</th>
             <th className="px-3 py-2.5 text-left text-gray-400">Materia</th>
             <th className="px-3 py-2.5 text-left text-gray-400">Grupo</th>
+            <th className="px-3 py-2.5 text-left text-gray-400">Semestre</th>
             <th className="px-3 py-2.5 text-left text-gray-400">Docente</th>
             <th className="px-3 py-2.5 text-left text-gray-400">Espacio</th>
             <th className="px-3 py-2.5 text-left text-gray-400">Dia</th>
@@ -177,9 +332,10 @@ function ListView({ asignaciones }: { asignaciones: Asig[] }) {
           {asignaciones.map((a) => (
             <tr key={a.id} className="hover:bg-gray-800/50">
               <td className="px-3 py-2 font-mono text-blue-400">{a.materiaCodigo}</td>
-              <td className="px-3 py-2 text-white max-w-[180px] truncate">{a.materiaNombre}</td>
+              <td className="px-3 py-2 text-white max-w-[160px] truncate">{a.materiaNombre}</td>
               <td className="px-3 py-2 text-gray-300">{a.grupoCodigo}</td>
-              <td className="px-3 py-2 text-gray-300 max-w-[150px] truncate">{a.docenteNombre}</td>
+              <td className="px-3 py-2 text-gray-400">{a.semestre}</td>
+              <td className="px-3 py-2 text-gray-300 max-w-[130px] truncate">{a.docenteNombre}</td>
               <td className="px-3 py-2 text-gray-400 font-mono">{a.espacioCodigo}</td>
               <td className="px-3 py-2 text-gray-300">{a.dia}</td>
               <td className="px-3 py-2 text-gray-400 font-mono">{a.slots[0]}-{a.slots[a.slots.length - 1]}</td>
@@ -194,6 +350,8 @@ function ListView({ asignaciones }: { asignaciones: Asig[] }) {
     </div>
   );
 }
+
+// ─── VIEW: CONFLICTOS ───────────────────────────────────────────────────────
 
 function ConflictosView({ conflictos }: { conflictos: Props["data"]["conflictos"] }) {
   if (conflictos.length === 0) {
@@ -214,6 +372,7 @@ function ConflictosView({ conflictos }: { conflictos: Props["data"]["conflictos"
             <th className="px-3 py-2.5 text-left text-gray-400">Materia</th>
             <th className="px-3 py-2.5 text-left text-gray-400">Grupo</th>
             <th className="px-3 py-2.5 text-left text-gray-400">Carrera</th>
+            <th className="px-3 py-2.5 text-left text-gray-400">Semestre</th>
             <th className="px-3 py-2.5 text-left text-gray-400">Motivo</th>
           </tr>
         </thead>
@@ -223,8 +382,9 @@ function ConflictosView({ conflictos }: { conflictos: Props["data"]["conflictos"
               <td className="px-3 py-2 font-mono text-red-400">{c.materiaCodigo}</td>
               <td className="px-3 py-2 text-white">{c.materiaNombre}</td>
               <td className="px-3 py-2 text-gray-300">{c.grupoCodigo}</td>
-              <td className="px-3 py-2 text-gray-400 max-w-[150px] truncate">{c.carrera}</td>
-              <td className="px-3 py-2 text-red-300">{c.motivo}</td>
+              <td className="px-3 py-2 text-gray-400 max-w-[140px] truncate">{c.carrera}</td>
+              <td className="px-3 py-2 text-gray-400">{c.semestre}</td>
+              <td className="px-3 py-2 text-red-300 max-w-[200px]">{c.motivo}</td>
             </tr>
           ))}
         </tbody>
@@ -232,6 +392,8 @@ function ConflictosView({ conflictos }: { conflictos: Props["data"]["conflictos"
     </div>
   );
 }
+
+// ─── STAT ───────────────────────────────────────────────────────────────────
 
 function Stat({ label, value, color }: { label: string; value: any; color: string }) {
   const colors: Record<string, string> = {
