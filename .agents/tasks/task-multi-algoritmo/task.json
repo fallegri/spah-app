@@ -2,7 +2,7 @@
   "task_id": "task-multi-algoritmo",
   "task_description": "Implement multi-algorithm scheduler (iterative, greedy, genetic) with algorithm selection in UI and multi-process support where each execution is independent and coexists in the DB",
   "status": "completed",
-  "feature_order": ["FEAT-001", "FEAT-002"],
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
   "blocked_reason": null,
   "verification": {
     "build": "pass",

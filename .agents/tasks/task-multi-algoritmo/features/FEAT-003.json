@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "fix",
   "description": "Address code review issues: fix genetic crossover gene ordering, fix repairAndEvaluate capacity/type bypass, gate AIR/SinDocente fallbacks on config flags, add LIMIT to ejecuciones endpoint, remove unused import.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In genetico.ts: Sort genes by (unidadIdx, sesionIdx) before crossover so positional correspondence is guaranteed across individuals.",
     "In genetico.ts: Fix repairAndEvaluate to look up the actual espacio from the espacios list (passed as a parameter) for non-AIR genes, passing real capacity and espacio object to isValid.",
@@ -22,5 +22,5 @@
     "Run `npx tsc --noEmit` in project root and confirm 0 errors"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 5 review issues addressed. TypeScript compilation passes with 0 errors. The genetic crossover now sorts genes by identity before splicing, repairAndEvaluate uses actual espacio objects for capacity/type/school validation, all three algorithms respect permitirAIR and permitirSinDocente config flags (with practicas always allowed to use AIR), ejecuciones endpoint capped at 50 results, and unused import removed."
 }
