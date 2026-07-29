@@ -53,10 +53,17 @@ export async function POST(req: NextRequest) {
       loadReservas(gestion),
     ]);
 
+    // ═══ DEACTIVATE previous active executions for this gestion ═══
+    // Each execution is an independent session — the new one becomes the active one
+    await db
+      .update(ejecuciones)
+      .set({ activa: false })
+      .where(eq(ejecuciones.gestion, gestion));
+
     // Execute scheduler
     const result = ejecutarScheduler(docentesData, catalogoData, espaciosData, reservasData, config);
 
-    // Save execution
+    // Save execution as NEW session (activa = true)
     const [ejecucion] = await db
       .insert(ejecuciones)
       .values({

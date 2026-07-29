@@ -11,6 +11,9 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:seed": "npx tsx scripts/seed-demo.ts",
+    "db:limpiar": "npx tsx scripts/limpiar-bd.ts",
+    "db:sintetico": "npx tsx scripts/seed-sintetico.ts",
+    "db:reset": "npx tsx scripts/limpiar-bd.ts && npx tsx scripts/seed-sintetico.ts",
     "admin:create": "npx tsx scripts/crear-primer-admin.ts"
   },
   "dependencies": {

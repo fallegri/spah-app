@@ -10,6 +10,7 @@ export default async function ResultadosPage() {
   const [exec] = await db
     .select()
     .from(ejecuciones)
+    .where(eq(ejecuciones.activa, true))
     .orderBy(desc(ejecuciones.createdAt))
     .limit(1);
 
