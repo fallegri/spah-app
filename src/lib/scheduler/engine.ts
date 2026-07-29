@@ -441,32 +441,15 @@ function construirDominio(state: CSPState, unidad: UnidadTrabajo, nBloques: numb
     }
   }
 
-  // Fallback domain: AIR (if permitted)
-  if (state.config.permitirAIR && domain.length === 0) {
-    const espacioAIR = crearEspacioAIR();
-    for (const dia of dias) {
-      for (const ventana of ventanas) {
-        for (const docente of docentesCand) {
-          if (!verificarDisponibilidad(docente, dia, ventana.slots)) continue;
-          if (!verificarHabilitacion(docente, materia.codigo)) continue;
-          domain.push({
-            dia,
-            slots: ventana.slots,
-            docente,
-            espacio: espacioAIR,
-            esAIR: true,
-            esSinDocente: false,
-            softScore: calcularSoftScore(state, unidad, dia, ventana.slots, docente) + 100,
-          });
-        }
-      }
-    }
-  }
+  // Fallback domains: ALWAYS add these as options (with penalty score)
+  // This ensures every materia can be scheduled even without ideal resources
 
-  // Fallback domain: Sin Docente (if permitted)
-  if (state.config.permitirSinDocente && domain.length === 0) {
+  // Fallback 1: Sin Docente + physical space
+  if (state.config.permitirSinDocente) {
     for (const dia of dias) {
+      if (dia === "Sábado" && !tieneSabadoHabilitado(state)) continue;
       for (const ventana of ventanas) {
+        if (dia === "Sábado" && !slotEnTurnoSabado(ventana.slots, state)) continue;
         for (const espacio of espaciosCand) {
           if (espacio.tipo !== materia.tipoAula) continue;
           if (espacio.aforo < (materia.proyeccionInscritos || 0)) continue;
@@ -488,11 +471,37 @@ function construirDominio(state: CSPState, unidad: UnidadTrabajo, nBloques: numb
     }
   }
 
-  // Last resort: AIR + Sin Docente
-  if (state.config.permitirAIR && state.config.permitirSinDocente && domain.length === 0) {
+  // Fallback 2: Docente + AIR space
+  if (state.config.permitirAIR) {
     const espacioAIR = crearEspacioAIR();
     for (const dia of dias) {
+      if (dia === "Sábado" && !tieneSabadoHabilitado(state)) continue;
       for (const ventana of ventanas) {
+        if (dia === "Sábado" && !slotEnTurnoSabado(ventana.slots, state)) continue;
+        for (const docente of docentesCand) {
+          if (!verificarDisponibilidad(docente, dia, ventana.slots)) continue;
+          if (!verificarHabilitacion(docente, materia.codigo)) continue;
+          domain.push({
+            dia,
+            slots: ventana.slots,
+            docente,
+            espacio: espacioAIR,
+            esAIR: true,
+            esSinDocente: false,
+            softScore: calcularSoftScore(state, unidad, dia, ventana.slots, docente) + 100,
+          });
+        }
+      }
+    }
+  }
+
+  // Fallback 3: AIR + Sin Docente (last resort)
+  if (state.config.permitirAIR && state.config.permitirSinDocente) {
+    const espacioAIR = crearEspacioAIR();
+    for (const dia of dias) {
+      if (dia === "Sábado" && !tieneSabadoHabilitado(state)) continue;
+      for (const ventana of ventanas) {
+        if (dia === "Sábado" && !slotEnTurnoSabado(ventana.slots, state)) continue;
         domain.push({
           dia,
           slots: ventana.slots,
