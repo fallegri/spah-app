@@ -251,14 +251,19 @@ export function ejecutarScheduler(
     });
   }
 
-  function getDaysOrdered(studentKey: string, usedDays: Dia[]): Dia[] {
+  function getDaysOrdered(studentKey: string, usedDays: Dia[], materTurno?: Turno): Dia[] {
     // Prefer least loaded days, prefer non-contiguous to already used days
     const diaIndex: Record<string, number> = {
       "Lunes": 0, "Martes": 1, "Miércoles": 2, "Jueves": 3, "Viernes": 4, "Sábado": 5,
     };
     const available = DIAS.filter((d) => {
       if (d === "Sábado") {
-        return config.sabadoManana || config.sabadoTarde || config.sabadoNoche;
+        // Only include Saturday if the materia's turno is enabled for Saturday
+        if (!materTurno) return config.sabadoManana || config.sabadoTarde || config.sabadoNoche;
+        if (materTurno === "Mañana") return config.sabadoManana;
+        if (materTurno === "Tarde") return config.sabadoTarde;
+        if (materTurno === "Noche") return config.sabadoNoche;
+        return false;
       }
       return true;
     });
@@ -327,7 +332,7 @@ export function ejecutarScheduler(
         }
       }
 
-      const days = getDaysOrdered(studentKey, usedDaysForMateria);
+      const days = getDaysOrdered(studentKey, usedDaysForMateria, turno);
       let assigned = false;
 
       // Attempt 1: Normal (docente + physical space)
