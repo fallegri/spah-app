@@ -298,33 +298,26 @@ function TimetableGrid({ asignaciones, showDocente = false, showCarrera = false,
                 }
 
                 const isFirst = a.slots[0] === slot;
+                const isLast = a.slots[a.slots.length - 1] === slot;
+
+                const bgColor = a.esAIR ? "bg-amber-900/50 text-amber-200" :
+                  a.esSinDocente ? "bg-orange-900/50 text-orange-200" :
+                  a.tipoEspacio === "LABORATORIO" ? "bg-blue-900/40 text-blue-200" :
+                  a.tipoEspacio === "TALLER" ? "bg-purple-900/40 text-purple-200" :
+                  "bg-gray-700 text-gray-200";
 
                 return (
-                  <td key={cellKey} className="px-0.5 py-0.5 border-b border-gray-800/30">
-                    <div
-                      className={`px-1.5 py-0.5 text-[9px] leading-tight h-full flex flex-col justify-center ${
-                        isFirst ? "rounded-t" : ""
-                      } ${a.slots[a.slots.length - 1] === slot ? "rounded-b" : ""} ${
-                        a.esAIR ? "bg-amber-900/40 border-x border-amber-700/60 text-amber-200" :
-                        a.esSinDocente ? "bg-orange-900/40 border-x border-orange-700/60 text-orange-200" :
-                        a.tipoEspacio === "LABORATORIO" ? "bg-blue-900/30 border-x border-blue-800/60 text-blue-200" :
-                        a.tipoEspacio === "TALLER" ? "bg-purple-900/30 border-x border-purple-800/60 text-purple-200" :
-                        "bg-gray-800 border-x border-gray-700 text-gray-200"
-                      } ${isFirst ? "border-t" : ""} ${a.slots[a.slots.length - 1] === slot ? "border-b" : ""}`}
-                    >
-                      <div className="font-bold truncate">{a.materiaCodigo}</div>
-                      {isFirst && <div className="truncate opacity-80">{a.materiaNombre}</div>}
+                  <td key={cellKey} className={`px-1.5 py-0.5 align-middle ${bgColor} ${isFirst ? "border-t border-t-gray-600" : ""} ${isLast ? "border-b border-b-gray-600" : ""} border-x border-x-gray-800/50`}>
+                    <div className="text-[9px] leading-tight">
+                      <span className="font-bold">{a.materiaCodigo}</span>
+                      {isFirst && <span className="ml-1 opacity-80 truncate">{a.materiaNombre}</span>}
                       {isFirst && showDocente && (
                         <div className="opacity-70 truncate cursor-pointer hover:underline" onClick={() => onDocenteClick?.(a.docenteNombre)}>
                           {a.docenteNombre}
                         </div>
                       )}
                       {isFirst && showCarrera && <div className="opacity-70 truncate">{a.carrera.split(" ").slice(0,3).join(" ")}</div>}
-                      {isFirst && (
-                        <div className="opacity-60 truncate">
-                          {a.espacioCodigo} {a.slots[0]}-{calcEndTime(a.slots[a.slots.length-1])}
-                        </div>
-                      )}
+                      {isFirst && <div className="opacity-60">{a.espacioCodigo} · {a.slots[0]}-{calcEndTime(a.slots[a.slots.length-1])}</div>}
                     </div>
                   </td>
                 );
