@@ -745,13 +745,14 @@ function resolverCSP(state: CSPState): boolean {
 
 function intentarAsignarVariable(state: CSPState, variable: CSPVariable): boolean {
   // Sort domain values by dynamic soft score (best first)
+  // The soft score already heavily penalizes bridges, so gap-free options come first
   const sortedDomain = [...variable.domain].sort((a, b) => {
     const aSoft = a.softScore + calcularSoftScoreDinamico(state, variable, a);
     const bSoft = b.softScore + calcularSoftScoreDinamico(state, variable, b);
     return aSoft - bSoft;
   });
 
-  // Try each value in order of preference
+  // Try each value in order of preference (best score = no gaps, adjacent slots)
   for (const value of sortedDomain) {
     if (isConsistentWithState(state, variable, value)) {
       variable.assigned = value;
@@ -760,64 +761,10 @@ function intentarAsignarVariable(state: CSPState, variable: CSPVariable): boolea
     }
   }
 
-  // If primary domain failed, try relaxed options:
-  // Try with bridge constraint relaxed (allow gap > 1)
-  for (const value of sortedDomain) {
-    if (isConsistentRelaxed(state, variable, value)) {
-      variable.assigned = value;
-      applyAssignment(state, variable, value);
-      state.log.push("[RELAX-BRIDGE] " + variable.id + " asignado con puente > 1 periodo");
-      return true;
-    }
-  }
-
   return false;
 }
 
-// Relaxed consistency check: same as isConsistentWithState but allows bridges > 1
-function isConsistentRelaxed(state: CSPState, variable: CSPVariable, value: DomainValue): boolean {
-  const materia = variable.unidad.materia;
-  const studentKey = buildStudentGroupKey(materia.carrera, materia.semestre, materia.grupoCodigo);
-
-  // HC-05: No student group overlap
-  for (const slot of value.slots) {
-    if (state.estudiantesOcupados.has(studentKey + "|" + value.dia + "|" + slot)) {
-      return false;
-    }
-  }
-
-  // HC-01: No docente overlap
-  if (value.docente !== null) {
-    for (const slot of value.slots) {
-      if (state.docenteOcupado.has(value.docente.id + "|" + value.dia + "|" + slot)) {
-        return false;
-      }
-    }
-  }
-
-  // HC-02: No space double-booking
-  if (!value.esAIR) {
-    for (const slot of value.slots) {
-      if (state.espacioOcupado.has(value.espacio.id + "|" + value.dia + "|" + slot)) {
-        return false;
-      }
-    }
-  }
-
-  // HC-08: Max 7 periods per day per student group
-  const cargaKey = studentKey + "|" + value.dia;
-  const cargaActual = state.grupoCargaDiaria.get(cargaKey) || 0;
-  if (cargaActual + value.slots.length > 7) return false;
-
-  // NO bridge check — this is the relaxed version
-
-  // HC: Space school match (allow mismatch for AIR)
-  if (!value.esAIR && value.espacio.escuela !== 0 && value.espacio.escuela !== materia.escuela) {
-    return false;
-  }
-
-  return true;
-}
+// (isConsistentRelaxed removed — bridge is now a soft constraint, not hard)
 
 function selectVariableMRV(unassigned: CSPVariable[]): CSPVariable {
   // MRV: choose variable with smallest domain
@@ -848,7 +795,9 @@ function calcularSoftScoreDinamico(state: CSPState, variable: CSPVariable, value
 
   if (existingOnDay.length > 0) {
     const gap = calcularGapConAsignados(state, studentKey, value.dia, value.slots);
-    score += gap * 30; // Penalize gaps heavily
+    if (gap === 0) score += 0;           // Adjacent: perfect, no penalty
+    else if (gap === 1) score += 50;     // 1 period bridge: acceptable but penalized
+    else score += gap * 500;             // >1 period bridge: extreme penalty (almost never chosen)
   }
 
   // SC-03: Prefer non-contiguous days for multi-session subjects
@@ -924,11 +873,8 @@ function isConsistentWithState(state: CSPState, variable: CSPVariable, value: Do
   const cargaActual = state.grupoCargaDiaria.get(cargaKey) || 0;
   if (cargaActual + value.slots.length > 7) return false;
 
-  // HC bridge: Max 1 period gap between classes of same group on same day
-  if (cargaActual > 0) {
-    const gap = calcularGapConAsignados(state, studentKey, value.dia, value.slots);
-    if (gap > 1) return false;
-  }
+  // Bridge is handled by soft scoring (not a hard constraint)
+  // The scoring function heavily penalizes gaps, so gap-free options are tried first
 
   // HC: Space school must match materia school (escuela)
   if (!value.esAIR && value.espacio.escuela !== 0 && value.espacio.escuela !== materia.escuela) {
