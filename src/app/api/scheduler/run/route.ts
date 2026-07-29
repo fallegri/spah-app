@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
 import { ejecutarScheduler } from "@/lib/scheduler/engine";
+
+// Increase serverless function timeout for heavy algorithms (Vercel Pro: 300s, Hobby: 60s)
+export const maxDuration = 300;
 import {
   docentes,
   disponibilidadDocente,

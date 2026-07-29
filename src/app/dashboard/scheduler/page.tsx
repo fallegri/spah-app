@@ -24,7 +24,13 @@ export default function SchedulerPage() {
         body: JSON.stringify({ config, gestion }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("El servidor no respondió correctamente. Posible timeout — intenta con menos generaciones/población o usa el algoritmo Iterativo.");
+      }
       if (!res.ok) throw new Error(data.error);
       setResult(data.resultado);
     } catch (err: any) {
