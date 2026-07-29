@@ -123,6 +123,7 @@ export interface UnidadTrabajo {
   sesiones: number[];           // Array of block counts per session [3,2]
   dificultad: number;
   esPrioritaria: boolean;
+  esPractica: boolean;          // Prácticas laborales/profesionales → always AIR
   grupoKey: string;             // carrera|semestre|codigo|grupo unique key
 }
 

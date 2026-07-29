@@ -36,7 +36,7 @@ interface SchedulerState {
   // grupoBase extracts the core group identifier (e.g., "2AM" from "2AM", "2A" from "2A")
   // to handle cases where same students appear under slightly different grupoCodigo in the catalog
   estudiantesOcupados: Map<string, boolean>;
-  // HC-08: Max 8 periods per day for a student group
+  // HC-08: Max 7 periods per day for a student group
   // KEY: `${carrera}|${semestre}|${grupoBase}|${dia}`
   grupoCargaDiaria: Map<string, number>;
   // HC-13: Docente can't teach 2 different subjects to the same grupoCodigo
@@ -175,17 +175,22 @@ function construirUnidadesDeTrabajo(state: SchedulerState): UnidadTrabajo[] {
     const maxPorSesion =
       tipo === "AULA" ? 4 : tipo === "TALLER" ? config.maxPerSesionTaller : config.maxPerSesionLab;
 
-    const sesiones = repartirEnSesiones(materia.horasPorSemana, maxPorSesion);
+    const sesiones = repartirEnSesiones(materia.horasPorSemana, maxPorSesion, materia.tipoAula);
     const dificultad = calcularDificultad(materia, state);
     const esPrioritaria = tieneDocentePrioritario(materia, state);
+    const esPractica = esPracticaLaboral(materia);
     // grupoKey for the work unit (includes materia code for internal tracking)
     const grupoKey = `${materia.carrera}|${materia.semestre}|${materia.codigo}|${materia.grupoCodigo}`;
 
-    return { materia, sesiones, dificultad, esPrioritaria, grupoKey };
+    return { materia, sesiones, dificultad, esPrioritaria, esPractica, grupoKey };
   });
 
   unidades.sort((a, b) => {
+    // Prácticas go last (they always get AIR, easy to schedule)
+    if (a.esPractica !== b.esPractica) return a.esPractica ? 1 : -1;
+    // Priority docentes first
     if (a.esPrioritaria !== b.esPrioritaria) return a.esPrioritaria ? -1 : 1;
+    // Most constrained first (highest difficulty)
     return b.dificultad - a.dificultad;
   });
 
@@ -193,14 +198,34 @@ function construirUnidadesDeTrabajo(state: SchedulerState): UnidadTrabajo[] {
 }
 
 function calcularDificultad(materia: MateriaCatalogo, state: SchedulerState): number {
-  let score = materia.horasPorSemana * 2;
-  if (materia.tipoAula === "LABORATORIO") score += 30;
-  else if (materia.tipoAula === "TALLER") score += 20;
+  let score = 0;
+
+  // More weekly hours = harder to fit
+  score += materia.horasPorSemana * 3;
+
+  // Practical spaces (labs/talleres) are scarcer
+  if (materia.tipoAula === "LABORATORIO") score += 35;
+  else if (materia.tipoAula === "TALLER") score += 25;
+
+  // Count available spaces (same school + same type + sufficient capacity)
   const espaciosDisp = state.espacios.filter(
     (e) => e.tipo === materia.tipoAula && e.escuela === materia.escuela && e.aforo >= (materia.proyeccionInscritos || 0)
   );
-  if (espaciosDisp.length <= 2) score += 15;
-  if (espaciosDisp.length === 0) score += 50;
+  if (espaciosDisp.length === 0) score += 60;
+  else if (espaciosDisp.length === 1) score += 40;
+  else if (espaciosDisp.length <= 3) score += 20;
+
+  // Count available docentes (fewer = harder)
+  const docentesDisp = state.docentes.filter((d) =>
+    d.materiasHabilitadas.some((mh) => mh.sigla === materia.codigo)
+  );
+  if (docentesDisp.length === 0) score += 50;
+  else if (docentesDisp.length === 1) score += 30;
+  else if (docentesDisp.length <= 2) score += 15;
+
+  // Larger groups are harder (need bigger rooms)
+  if ((materia.proyeccionInscritos || 0) > 35) score += 10;
+
   return score;
 }
 
@@ -212,18 +237,92 @@ function tieneDocentePrioritario(materia: MateriaCatalogo, state: SchedulerState
   );
 }
 
-function repartirEnSesiones(horas: number, maxPorSesion: number): number[] {
+// Detects if a subject is "Prácticas Laborales" or "Prácticas Profesionales"
+// These must always be scheduled in AIR (virtual/remote)
+function esPracticaLaboral(materia: MateriaCatalogo): boolean {
+  const nombre = materia.nombreAsignatura.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const codigo = materia.codigo.toUpperCase();
+  
+  const keywords = [
+    "PRACTICA LABORAL",
+    "PRACTICAS LABORALES",
+    "PRACTICA PROFESIONAL",
+    "PRACTICAS PROFESIONALES",
+    "PASANTIA",
+    "PASANTIAS",
+    "TRABAJO DIRIGIDO",
+    "PROYECTO DE GRADO",
+  ];
+  
+  return keywords.some((kw) => nombre.includes(kw)) || 
+    codigo.startsWith("PRL") || codigo.startsWith("PRP") || codigo.startsWith("PAS");
+}
+
+/**
+ * Distribuye las horas semanales de una materia en sesiones.
+ * 
+ * REGLAS:
+ * - Mínimo 2 periodos por sesión (no se permite 1 periodo solo)
+ * - AULA (teórica): máximo 4 periodos (3h) por sesión. Si tiene 4h → 2+2
+ * - TALLER/LAB: pueden tener 4+ periodos continuos (configurable)
+ * - Todas las horas deben programarse (no se pierden)
+ */
+function repartirEnSesiones(horas: number, maxPorSesion: number, tipoAula: TipoEspacio | null): number[] {
   if (horas <= 0) return [];
-  if (horas <= maxPorSesion) return [horas];
-  const numSesiones = Math.ceil(horas / maxPorSesion);
+
+  // Caso especial: materias teóricas (AULA) - max 3 periodos por sesión para forzar 2+2 en vez de 4
+  // La regla dice: "si una materia tiene 4h teórica → 2+2, no pueden ir 4h teóricas seguidas"
+  const maxReal = tipoAula === "AULA" ? Math.min(maxPorSesion, 3) : maxPorSesion;
+
+  if (horas <= maxReal) {
+    // Si cabe en una sola sesión y tiene al menos 2 periodos, va completa
+    if (horas >= 2) return [horas];
+    // Si tiene exactamente 1h (raro pero posible), forzar a 2 no es posible - dejar como está
+    return [horas];
+  }
+
+  // Distribuir en múltiples sesiones equilibradas
+  const numSesiones = Math.ceil(horas / maxReal);
   const base = Math.floor(horas / numSesiones);
   const extra = horas % numSesiones;
   const sesiones: number[] = [];
+
   for (let i = 0; i < numSesiones; i++) {
     sesiones.push(base + (i < extra ? 1 : 0));
   }
-  sesiones.sort((a, b) => b - a);
-  return sesiones;
+
+  // Validar que ninguna sesión tenga menos de 2 periodos
+  // Si hay una sesión de 1, fusionarla con la anterior
+  for (let i = sesiones.length - 1; i >= 0; i--) {
+    if (sesiones[i] < 2 && sesiones.length > 1) {
+      if (i > 0) {
+        sesiones[i - 1] += sesiones[i];
+        sesiones.splice(i, 1);
+      } else if (i < sesiones.length - 1) {
+        sesiones[i + 1] += sesiones[i];
+        sesiones.splice(i, 1);
+      }
+    }
+  }
+
+  // Re-validar que no exceda maxReal después de fusiones
+  const final: number[] = [];
+  for (const s of sesiones) {
+    if (s > maxReal) {
+      // Re-split this session
+      const sub = Math.ceil(s / maxReal);
+      const subBase = Math.floor(s / sub);
+      const subExtra = s % sub;
+      for (let j = 0; j < sub; j++) {
+        final.push(subBase + (j < subExtra ? 1 : 0));
+      }
+    } else {
+      final.push(s);
+    }
+  }
+
+  final.sort((a, b) => b - a);
+  return final;
 }
 
 // ─── PHASE 2: BACKTRACKING ──────────────────────────────────────────────────
@@ -233,12 +332,24 @@ function intentarConBacktracking(
 ): Asignacion | null {
   const ordenDias = calcularOrdenDias(state, unidad, sesionIndex);
 
+  // Prácticas laborales/profesionales: ALWAYS use AIR (virtual)
+  if (unidad.esPractica) {
+    let resultado = intentarAsignarSesion(state, unidad, nBloques, sesionIndex, ordenDias, true, false);
+    if (resultado) return resultado;
+    // Fallback: AIR + Sin Docente
+    if (state.config.permitirSinDocente) {
+      resultado = intentarAsignarSesion(state, unidad, nBloques, sesionIndex, ordenDias, true, true);
+      if (resultado) return resultado;
+    }
+    return null;
+  }
+
   // Try 1: Greedy with optimal day order
   let resultado = intentarAsignarSesion(state, unidad, nBloques, sesionIndex, ordenDias, false, false);
   if (resultado) return resultado;
 
   // Tries 2+: Smart permutations that PRESERVE same-day avoidance
-  // Only shuffle within the "unused days" portion, keeping used days at the end
+  // Harder subjects (higher difficulty) get more permutation attempts
   const diasUsados = state.asignaciones
     .filter((a) => a.materiaCodigo === unidad.materia.codigo && a.grupoCodigo === unidad.materia.grupoCodigo)
     .map((a) => a.dia);
@@ -246,35 +357,37 @@ function intentarConBacktracking(
   const diasNoUsados = ordenDias.filter((d) => !diasUsados.includes(d));
   const diasYaUsados = ordenDias.filter((d) => diasUsados.includes(d));
 
-  for (let i = 0; i < 5 && state.backtrackCount < state.config.maxBacktrack; i++) {
+  // Adaptive: harder subjects get more attempts (5-10 based on difficulty)
+  const smartAttempts = Math.min(10, 5 + Math.floor(unidad.dificultad / 30));
+
+  for (let i = 0; i < smartAttempts && state.backtrackCount < state.config.maxBacktrack; i++) {
     state.backtrackCount++;
-    // Permute only unused days; keep used days at end (last resort)
     const permuted = [...shuffleArray([...diasNoUsados]), ...shuffleArray([...diasYaUsados])];
     resultado = intentarAsignarSesion(state, unidad, nBloques, sesionIndex, permuted, false, false);
     if (resultado) return resultado;
   }
 
   // Fallback: Allow same-day (full random permutation) before resorting to AIR/SinDocente
-  for (let i = 0; i < 3 && state.backtrackCount < state.config.maxBacktrack; i++) {
+  for (let i = 0; i < 5 && state.backtrackCount < state.config.maxBacktrack; i++) {
     state.backtrackCount++;
     const fullPermuted = shuffleArray([...ordenDias]);
     resultado = intentarAsignarSesion(state, unidad, nBloques, sesionIndex, fullPermuted, false, false);
     if (resultado) return resultado;
   }
 
-  // Fallback 1: AIR (fictitious space)
+  // Fallback 1: AIR (fictitious space) — keeps docente
   if (state.config.permitirAIR) {
     resultado = intentarAsignarSesion(state, unidad, nBloques, sesionIndex, ordenDias, true, false);
     if (resultado) return resultado;
   }
 
-  // Fallback 2: Sin Docente
+  // Fallback 2: Sin Docente — keeps physical space
   if (state.config.permitirSinDocente) {
     resultado = intentarAsignarSesion(state, unidad, nBloques, sesionIndex, ordenDias, false, true);
     if (resultado) return resultado;
   }
 
-  // Fallback 3: Both comodines
+  // Fallback 3: Both comodines — last resort
   if (state.config.permitirAIR && state.config.permitirSinDocente) {
     resultado = intentarAsignarSesion(state, unidad, nBloques, sesionIndex, ordenDias, true, true);
     if (resultado) return resultado;
@@ -340,7 +453,7 @@ function intentarAsignarSesion(
   const materia = unidad.materia;
   const docentesCand = usarSinDocente ? [null] : docentesCandidatos(state, materia);
   const espaciosCand = usarAIR ? [crearEspacioAIR()] : espaciosCandidatos(state, materia);
-  const ventanas = generarVentanas(nBloques, materia.turno, state);
+  const ventanasBase = generarVentanas(nBloques, materia.turno, state);
 
   // Student group key (carrera + semestre + grupoCodigo) — NOT including materia
   // Uses centralized normalization to handle inconsistencies from Excel data
@@ -348,6 +461,10 @@ function intentarAsignarSesion(
 
   for (const dia of ordenDias) {
     if (dia === "Sábado" && !esVentanaSabadoValida(materia.turno, state)) continue;
+
+    // SC-BRIDGE: Sort windows to prefer slots adjacent to existing group assignments
+    // This avoids "puentes" (gaps) in the student group's daily schedule
+    const ventanas = ordenarVentanasSinPuentes(ventanasBase, state, studentGroupKey, dia);
 
     for (const ventana of ventanas) {
       if (dia === "Sábado" && !slotEnTurnoSabado(ventana.slots, state)) continue;
@@ -362,10 +479,10 @@ function intentarAsignarSesion(
         continue;
       }
 
-      // ═══ HC-08: Max 8 periods per day for student group ═══
+      // ═══ HC-08: Max 7 periods per day for student group ═══
       const cargaDiariaKey = `${studentGroupKey}|${dia}`;
       const cargaActual = state.grupoCargaDiaria.get(cargaDiariaKey) || 0;
-      if (cargaActual + nBloques > 8) continue;
+      if (cargaActual + nBloques > 7) continue;
 
       for (const docente of docentesCand) {
         if (docente !== null) {
@@ -544,14 +661,11 @@ function espaciosCandidatos(state: SchedulerState, materia: MateriaCatalogo): Es
   return state.espacios
     .filter((e) =>
       e.tipo === materia.tipoAula &&
+      e.escuela === materia.escuela &&            // HC: School ownership — strict match
       e.aforo >= (materia.proyeccionInscritos || 0)
     )
     .sort((a, b) => {
-      // Prefer same school first
-      const aSchool = a.escuela === materia.escuela ? 0 : 1;
-      const bSchool = b.escuela === materia.escuela ? 0 : 1;
-      if (aSchool !== bSchool) return aSchool - bSchool;
-      // Then prefer smallest room that fits (minimize waste)
+      // Prefer smallest room that fits (minimize waste)
       return a.aforo - b.aforo;
     });
 }
@@ -566,6 +680,51 @@ function generarVentanas(nBloques: number, turno: string, state: SchedulerState)
     ventanas.push({ slots: slotWindow, inicio: SLOTS.indexOf(slotWindow[0]) });
   }
   return ventanas;
+}
+
+// SC-BRIDGE: Orders windows to prefer those adjacent to existing group assignments on the same day.
+// This prevents "puentes" (free periods between classes) for the student group.
+// Score: 0 = directly adjacent (best), higher = more gap slots between this window and existing classes.
+function ordenarVentanasSinPuentes(
+  ventanas: Ventana[], state: SchedulerState, studentGroupKey: string, dia: Dia
+): Ventana[] {
+  // Find all slots already occupied by this student group on this day
+  const occupiedSlotIndices: number[] = [];
+  for (let i = 0; i < SLOTS.length; i++) {
+    if (state.estudiantesOcupados.has(`${studentGroupKey}|${dia}|${SLOTS[i]}`)) {
+      occupiedSlotIndices.push(i);
+    }
+  }
+
+  // If no existing classes on this day, no bridge concern — return original order
+  if (occupiedSlotIndices.length === 0) return ventanas;
+
+  const minOccupied = Math.min(...occupiedSlotIndices);
+  const maxOccupied = Math.max(...occupiedSlotIndices);
+
+  // Score each window: how many gap slots would exist between this window and existing classes
+  const scored = ventanas.map((v) => {
+    const windowStart = SLOTS.indexOf(v.slots[0]);
+    const windowEnd = SLOTS.indexOf(v.slots[v.slots.length - 1]);
+
+    let gapScore: number;
+    if (windowEnd < minOccupied) {
+      // Window is entirely before existing classes — gap = distance between them
+      gapScore = minOccupied - windowEnd - 1;
+    } else if (windowStart > maxOccupied) {
+      // Window is entirely after existing classes — gap = distance between them
+      gapScore = windowStart - maxOccupied - 1;
+    } else {
+      // Window overlaps or is adjacent — perfect (score 0)
+      gapScore = 0;
+    }
+
+    return { ventana: v, gapScore };
+  });
+
+  // Sort: smallest gap first (0 = adjacent = best)
+  scored.sort((a, b) => a.gapScore - b.gapScore);
+  return scored.map((s) => s.ventana);
 }
 
 function crearEspacioAIR(): Espacio {
