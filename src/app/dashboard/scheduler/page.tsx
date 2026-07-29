@@ -92,9 +92,9 @@ export default function SchedulerPage() {
                     </label>
                     <input
                       type="range"
-                      min={20}
+                      min={5}
                       max={200}
-                      step={10}
+                      step={5}
                       value={config.genetico_poblacion}
                       onChange={(e) => setConfig({ ...config, genetico_poblacion: parseInt(e.target.value) })}
                       className="w-full accent-purple-500"
@@ -109,9 +109,9 @@ export default function SchedulerPage() {
                     </label>
                     <input
                       type="range"
-                      min={50}
+                      min={10}
                       max={500}
-                      step={25}
+                      step={10}
                       value={config.genetico_generaciones}
                       onChange={(e) => setConfig({ ...config, genetico_generaciones: parseInt(e.target.value) })}
                       className="w-full accent-purple-500"
