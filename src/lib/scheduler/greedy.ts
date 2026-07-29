@@ -164,7 +164,7 @@ export function ejecutarGreedy(
           }
 
           // Option type 2: Sin Docente + Physical space
-          if (!unidad.esPractica && espaciosCand.length > 0) {
+          if (config.permitirSinDocente && !unidad.esPractica && espaciosCand.length > 0) {
             for (const esp of espaciosCand) {
               if (isValid(state, null, esp.id, studentKey, dia, w, esp.aforo, materia.proyeccionInscritos || 0, materia.tipoAula, materia.escuela, esp, false)) {
                 const schoolMatch = esp.escuela === materia.escuela;
@@ -180,7 +180,7 @@ export function ejecutarGreedy(
           }
 
           // Option type 3: Docente + AIR
-          if (!unidad.esPractica && docentesCand.length > 0) {
+          if (config.permitirAIR && !unidad.esPractica && docentesCand.length > 0) {
             for (const doc of docentesCand) {
               if (!isDocenteDisponible(doc, dia, w)) continue;
               if (isValid(state, doc.id, null, studentKey, dia, w, 9999, materia.proyeccionInscritos || 0, materia.tipoAula, materia.escuela, null, true)) {
@@ -196,14 +196,16 @@ export function ejecutarGreedy(
           }
 
           // Option type 4: AIR + Sin Docente (last resort / practicas)
-          if (isValid(state, null, null, studentKey, dia, w, 9999, materia.proyeccionInscritos || 0, materia.tipoAula, materia.escuela, null, true)) {
-            candidates.push({
-              dia, slots: w,
-              docenteId: null, docenteNombre: "Sin Docente",
-              espacioId: null, espacioCodigo: "AIR",
-              esAIR: true, esSinDocente: true,
-              score: scoreOption(state, studentKey, dia, w, true, true, false),
-            });
+          if (unidad.esPractica || (config.permitirAIR && config.permitirSinDocente)) {
+            if (isValid(state, null, null, studentKey, dia, w, 9999, materia.proyeccionInscritos || 0, materia.tipoAula, materia.escuela, null, true)) {
+              candidates.push({
+                dia, slots: w,
+                docenteId: null, docenteNombre: "Sin Docente",
+                espacioId: null, espacioCodigo: "AIR",
+                esAIR: true, esSinDocente: true,
+                score: scoreOption(state, studentKey, dia, w, true, true, false),
+              });
+            }
           }
         }
       }

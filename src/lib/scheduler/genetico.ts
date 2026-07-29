@@ -16,7 +16,6 @@ import {
   inferirTurno,
   buildWorkUnits,
   createOccupancyState,
-  cloneOccupancyState,
   isValid,
   applyAssignment,
   getWindows,
@@ -152,7 +151,7 @@ function generateIndividual(
       }
 
       // Try: Sin Docente + Physical space
-      if (!assigned && !unidad.esPractica && shuffledEspacios.length > 0) {
+      if (!assigned && config.permitirSinDocente && !unidad.esPractica && shuffledEspacios.length > 0) {
         for (const dia of days) {
           if (assigned) break;
           for (const w of shuffledWindows) {
@@ -176,7 +175,7 @@ function generateIndividual(
       }
 
       // Try: Docente + AIR
-      if (!assigned && !unidad.esPractica && shuffledDocentes.length > 0) {
+      if (!assigned && config.permitirAIR && !unidad.esPractica && shuffledDocentes.length > 0) {
         for (const dia of days) {
           if (assigned) break;
           for (const w of shuffledWindows) {
@@ -200,8 +199,8 @@ function generateIndividual(
         }
       }
 
-      // Try: AIR + Sin Docente
-      if (!assigned) {
+      // Try: AIR + Sin Docente (always allowed for practicas, gated on config flags for others)
+      if (!assigned && (unidad.esPractica || (config.permitirAIR && config.permitirSinDocente))) {
         for (const dia of days) {
           if (assigned) break;
           for (const w of shuffledWindows) {
@@ -271,14 +270,27 @@ function tournamentSelect(population: Individual[], tournamentSize: number): Ind
 }
 
 // --- Crossover: single-point at session level ---
+// Genes MUST be sorted by (unidadIdx, sesionIdx) before crossover so that
+// positional correspondence is guaranteed across individuals.
+
+function sortGenesByIdentity(genes: SessionGene[]): SessionGene[] {
+  return [...genes].sort((a, b) => {
+    if (a.unidadIdx !== b.unidadIdx) return a.unidadIdx - b.unidadIdx;
+    return a.sesionIdx - b.sesionIdx;
+  });
+}
 
 function crossover(parent1: Individual, parent2: Individual): [SessionGene[], SessionGene[]] {
-  const len = Math.min(parent1.genes.length, parent2.genes.length);
-  if (len <= 1) return [[...parent1.genes], [...parent2.genes]];
+  // Sort both parents by (unidadIdx, sesionIdx) to ensure positional alignment
+  const sorted1 = sortGenesByIdentity(parent1.genes);
+  const sorted2 = sortGenesByIdentity(parent2.genes);
+
+  const len = Math.min(sorted1.length, sorted2.length);
+  if (len <= 1) return [[...sorted1], [...sorted2]];
 
   const point = randInt(1, len);
-  const child1Genes = [...parent1.genes.slice(0, point), ...parent2.genes.slice(point)];
-  const child2Genes = [...parent2.genes.slice(0, point), ...parent1.genes.slice(point)];
+  const child1Genes = [...sorted1.slice(0, point), ...sorted2.slice(point)];
+  const child2Genes = [...sorted2.slice(0, point), ...sorted1.slice(point)];
 
   return [child1Genes, child2Genes];
 }
@@ -358,7 +370,7 @@ function mutate(
     }
 
     // Fallback: AIR + Sin Docente
-    if (!mutated) {
+    if (!mutated && (unidad.esPractica || (config.permitirAIR && config.permitirSinDocente))) {
       for (const dia of days) {
         if (mutated) break;
         for (const w of shuffledWindows) {
@@ -384,10 +396,17 @@ function mutate(
 function repairAndEvaluate(
   genes: SessionGene[],
   unidades: UnidadTrabajo[],
+  espacios: Espacio[],
   reservas: ReservaExterna[]
 ): { repairedGenes: SessionGene[]; fitness: number } {
   const state = createOccupancyState(reservas);
   const repairedGenes: SessionGene[] = [];
+
+  // Build a lookup map for espacios by id for fast access
+  const espacioMap = new Map<number, Espacio>();
+  for (const esp of espacios) {
+    espacioMap.set(esp.id, esp);
+  }
 
   for (const gene of genes) {
     if (gene.isConflict || !gene.dia) {
@@ -404,7 +423,11 @@ function repairAndEvaluate(
     const materia = unidad.materia;
     const studentKey = buildStudentGroupKey(materia.carrera, materia.semestre, materia.grupoCodigo);
 
-    if (isValid(state, gene.docenteId, gene.espacioId, studentKey, gene.dia, gene.slots, 9999, materia.proyeccionInscritos || 0, materia.tipoAula, materia.escuela, null, gene.esAIR)) {
+    // Look up the actual espacio for non-AIR genes to validate capacity/type/school
+    const espacio = gene.esAIR || gene.espacioId === null ? null : espacioMap.get(gene.espacioId) || null;
+    const capacidad = espacio ? espacio.aforo : 9999;
+
+    if (isValid(state, gene.docenteId, gene.espacioId, studentKey, gene.dia, gene.slots, capacidad, materia.proyeccionInscritos || 0, materia.tipoAula, materia.escuela, espacio, gene.esAIR)) {
       applyAssignment(state, gene.docenteId, gene.espacioId, studentKey, gene.dia, gene.slots);
       repairedGenes.push(gene);
     } else {
@@ -487,8 +510,8 @@ export function ejecutarGenetico(
       const mutated2 = mutate(child2Genes, mutationRate, unidades, docentes, espacios, reservas, config);
 
       // Repair and evaluate
-      const { repairedGenes: repaired1, fitness: fit1 } = repairAndEvaluate(mutated1, unidades, reservas);
-      const { repairedGenes: repaired2, fitness: fit2 } = repairAndEvaluate(mutated2, unidades, reservas);
+      const { repairedGenes: repaired1, fitness: fit1 } = repairAndEvaluate(mutated1, unidades, espacios, reservas);
+      const { repairedGenes: repaired2, fitness: fit2 } = repairAndEvaluate(mutated2, unidades, espacios, reservas);
 
       newPopulation.push({ genes: repaired1, fitness: fit1 });
       if (newPopulation.length < populationSize) {

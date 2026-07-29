@@ -145,7 +145,7 @@ function ejecutarIterativo(
       }
 
       // Attempt 2: Sin Docente + physical space
-      if (!assigned && !unidad.esPractica && espaciosCand.length > 0) {
+      if (!assigned && config.permitirSinDocente && !unidad.esPractica && espaciosCand.length > 0) {
         for (const dia of days) {
           if (assigned) break;
           const orderedWindows = orderWindowsByAdjacency(windows, state, studentKey, dia);
@@ -173,7 +173,7 @@ function ejecutarIterativo(
       }
 
       // Attempt 3: Docente + AIR space
-      if (!assigned && !unidad.esPractica && docentesCand.length > 0) {
+      if (!assigned && config.permitirAIR && !unidad.esPractica && docentesCand.length > 0) {
         for (const dia of days) {
           if (assigned) break;
           const orderedWindows = orderWindowsByAdjacency(windows, state, studentKey, dia);
@@ -202,7 +202,7 @@ function ejecutarIterativo(
       }
 
       // Attempt 4: AIR + Sin Docente (last resort) or Practica (always AIR)
-      if (!assigned) {
+      if (!assigned && (unidad.esPractica || (config.permitirAIR && config.permitirSinDocente))) {
         for (const dia of days) {
           if (assigned) break;
           const orderedWindows = orderWindowsByAdjacency(windows, state, studentKey, dia);

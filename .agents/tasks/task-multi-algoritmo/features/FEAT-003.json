@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address code review issues: fix genetic crossover gene ordering, fix repairAndEvaluate capacity/type bypass, gate AIR/SinDocente fallbacks on config flags, add LIMIT to ejecuciones endpoint, remove unused import.",
+  "status": "in_progress",
+  "steps": [
+    "In genetico.ts: Sort genes by (unidadIdx, sesionIdx) before crossover so positional correspondence is guaranteed across individuals.",
+    "In genetico.ts: Fix repairAndEvaluate to look up the actual espacio from the espacios list (passed as a parameter) for non-AIR genes, passing real capacity and espacio object to isValid.",
+    "In engine.ts (iterative), greedy.ts, and genetico.ts: Gate AIR fallback attempts on config.permitirAIR and Sin Docente fallback attempts on config.permitirSinDocente.",
+    "In genetico.ts: Remove unused cloneOccupancyState import.",
+    "In ejecuciones/route.ts: Add LIMIT 50 to the query."
+  ],
+  "acceptance_criteria": [
+    "npx tsc --noEmit passes with 0 errors",
+    "Genetic crossover operates on genes sorted by (unidadIdx, sesionIdx) ensuring positional alignment",
+    "repairAndEvaluate validates capacity and type using actual espacio objects",
+    "AIR and SinDocente fallbacks are gated by config.permitirAIR and config.permitirSinDocente respectively",
+    "Ejecuciones endpoint has a LIMIT clause",
+    "No unused imports in genetico.ts"
+  ],
+  "verification": [
+    "Run `npx tsc --noEmit` in project root and confirm 0 errors"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

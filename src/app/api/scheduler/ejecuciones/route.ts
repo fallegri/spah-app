@@ -25,7 +25,8 @@ export async function GET(req: NextRequest) {
         createdAt: ejecuciones.createdAt,
       })
       .from(ejecuciones)
-      .orderBy(desc(ejecuciones.createdAt));
+      .orderBy(desc(ejecuciones.createdAt))
+      .limit(50);
 
     const serialized = data.map((e) => ({
       id: e.id,
