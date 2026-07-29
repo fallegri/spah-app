@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Update the UI to allow algorithm selection and support multi-process/gestion management. Users can select which algorithm to use, see previous executions listed, and start new processes without clearing the DB.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Update src/app/dashboard/scheduler/page.tsx: Add algorithm selector (radio buttons or dropdown) for 'Iterativo', 'Greedy con Scoring', 'Genetico'. Show genetic-specific params (population size, generations, mutation rate) only when genetico is selected. Wire the selected algorithm into the config sent to the API.",
     "Update src/app/dashboard/resultados/page.tsx: Instead of only showing the single active execution, fetch all executions and let the user pick which one to view. Show a list/table of past executions with: id, gestion, algorithm used, date, stats (assigned/conflicts). Keep the current detail view when an execution is selected.",
@@ -22,5 +22,5 @@
     "Run `npx tsc --noEmit` in project root and confirm 0 errors"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All changes compile cleanly. The scheduler page now shows 3 algorithm cards with genetic params conditionally displayed. The results page uses searchParams-based navigation for execution selection (option a from the briefing). The ejecuciones API endpoint follows the same auth pattern as other routes. Removed the deactivation block so all executions coexist independently in the DB."
 }
