@@ -444,19 +444,23 @@ function construirDominio(state: CSPState, unidad: UnidadTrabajo, nBloques: numb
   // Fallback domains: ALWAYS add these as options (with penalty score)
   // This ensures every materia can be scheduled even without ideal resources
 
-  // Fallback 1: Sin Docente + physical space
+  // Fallback 1: Sin Docente + physical space (relax school constraint)
   if (state.config.permitirSinDocente) {
+    // Use ALL spaces of matching type (ignore school for fallback)
+    const allMatchingSpaces = state.espacios.filter((e) =>
+      e.tipo === materia.tipoAula && e.aforo >= (materia.proyeccionInscritos || 0)
+    );
     for (const dia of dias) {
       if (dia === "Sábado" && !tieneSabadoHabilitado(state)) continue;
       for (const ventana of ventanas) {
         if (dia === "Sábado" && !slotEnTurnoSabado(ventana.slots, state)) continue;
-        for (const espacio of espaciosCand) {
-          if (espacio.tipo !== materia.tipoAula) continue;
-          if (espacio.aforo < (materia.proyeccionInscritos || 0)) continue;
+        for (const espacio of allMatchingSpaces) {
           const reservaConflict = ventana.slots.some((slot) =>
             state.espacioOcupado.has(espacio.id + "|" + dia + "|" + slot)
           );
           if (reservaConflict) continue;
+          // Penalty: +200 base, +50 extra if wrong school
+          const schoolPenalty = espacio.escuela !== materia.escuela ? 50 : 0;
           domain.push({
             dia,
             slots: ventana.slots,
@@ -464,7 +468,7 @@ function construirDominio(state: CSPState, unidad: UnidadTrabajo, nBloques: numb
             espacio,
             esAIR: false,
             esSinDocente: true,
-            softScore: calcularSoftScore(state, unidad, dia, ventana.slots, null) + 200,
+            softScore: calcularSoftScore(state, unidad, dia, ventana.slots, null) + 200 + schoolPenalty,
           });
         }
       }
@@ -517,6 +521,19 @@ function construirDominio(state: CSPState, unidad: UnidadTrabajo, nBloques: numb
 
   // Sort domain by soft score (best values first for efficiency)
   domain.sort((a, b) => a.softScore - b.softScore);
+
+  // Diagnostic log if domain is empty
+  if (domain.length === 0) {
+    state.log.push(
+      "[WARN] Dominio VACIO para " + materia.codigo + " (" + materia.grupoCodigo + "): " +
+      "turno=" + materia.turno + ", ventanas=" + ventanas.length +
+      ", espacios(escuela)=" + espaciosCand.length +
+      ", espacios(todos)=" + state.espacios.filter((e) => e.tipo === materia.tipoAula).length +
+      ", docentes=" + docentesCand.length +
+      ", permitirAIR=" + state.config.permitirAIR +
+      ", permitirSinDocente=" + state.config.permitirSinDocente
+    );
+  }
 
   return domain;
 }
@@ -1058,7 +1075,22 @@ function getEspaciosCandidatos(state: CSPState, materia: MateriaCatalogo): Espac
 }
 
 function generarVentanas(nBloques: number, turno: string, state: CSPState): Ventana[] {
-  const slotsDelTurno = TURNOS_SLOTS[turno as keyof typeof TURNOS_SLOTS];
+  // Try direct match first
+  let slotsDelTurno = TURNOS_SLOTS[turno as keyof typeof TURNOS_SLOTS];
+  
+  // If no direct match, try to infer turno from the string
+  if (!slotsDelTurno || slotsDelTurno.length === 0) {
+    const turnoNorm = turno.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (turnoNorm.includes("noche") || turnoNorm.endsWith("n")) {
+      slotsDelTurno = TURNOS_SLOTS["Noche"];
+    } else if (turnoNorm.includes("tarde") || turnoNorm.endsWith("t")) {
+      slotsDelTurno = TURNOS_SLOTS["Tarde"];
+    } else {
+      // Default to Mañana (covers "mañana", "manana", "AM", "BM", etc.)
+      slotsDelTurno = TURNOS_SLOTS["Mañana"];
+    }
+  }
+
   if (!slotsDelTurno || slotsDelTurno.length === 0) return [];
 
   const ventanas: Ventana[] = [];
