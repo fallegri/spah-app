@@ -32,10 +32,12 @@ interface SchedulerState {
   // HC-02: Space can't be double-booked
   espacioOcupado: Map<string, boolean>;       // `${espacioId}|${dia}|${slot}`
   // HC-05: Students of same carrera+semestre+grupo can't have overlapping classes
-  // KEY: `${carrera}|${semestre}|${grupoCodigo}|${dia}|${slot}`
+  // KEY: `${carrera}|${semestre}|${grupoBase}|${dia}|${slot}`
+  // grupoBase extracts the core group identifier (e.g., "2AM" from "2AM", "2A" from "2A")
+  // to handle cases where same students appear under slightly different grupoCodigo in the catalog
   estudiantesOcupados: Map<string, boolean>;
   // HC-08: Max 8 periods per day for a student group
-  // KEY: `${carrera}|${semestre}|${grupoCodigo}|${dia}`
+  // KEY: `${carrera}|${semestre}|${grupoBase}|${dia}`
   grupoCargaDiaria: Map<string, number>;
   // HC-13: Docente can't teach 2 different subjects to the same grupoCodigo
   // KEY: `${docenteId}|${grupoCodigo}` -> materiaCodigo (first assigned)
@@ -129,7 +131,7 @@ export function ejecutarScheduler(
   // Detect any HC-05 violations (student group overlaps) that might have slipped through
   const overlapCheck = new Map<string, string>(); // `${studentGroupKey}|${dia}|${slot}` -> materiaCodigo
   for (const a of state.asignaciones) {
-    const sgk = `${a.carrera.trim().toUpperCase()}|${a.semestre.trim().toUpperCase()}|${a.grupoCodigo.trim().toUpperCase()}`;
+    const sgk = buildStudentGroupKey(a.carrera, a.semestre, a.grupoCodigo);
     for (const slot of a.slots) {
       const key = `${sgk}|${a.dia}|${slot}`;
       const existing = overlapCheck.get(key);
@@ -283,7 +285,7 @@ function intentarConBacktracking(
 
 function calcularOrdenDias(state: SchedulerState, unidad: UnidadTrabajo, sesionIndex: number): Dia[] {
   const dias = DIAS.filter((d) => d !== "Sábado" || tieneSabadoHabilitado(state));
-  const studentKey = `${unidad.materia.carrera.trim().toUpperCase()}|${unidad.materia.semestre.trim().toUpperCase()}|${unidad.materia.grupoCodigo.trim().toUpperCase()}`;
+  const studentKey = buildStudentGroupKey(unidad.materia.carrera, unidad.materia.semestre, unidad.materia.grupoCodigo);
 
   // Sort by least loaded day for this student group
   const cargaPorDia = dias.map((dia) => ({
@@ -341,8 +343,8 @@ function intentarAsignarSesion(
   const ventanas = generarVentanas(nBloques, materia.turno, state);
 
   // Student group key (carrera + semestre + grupoCodigo) — NOT including materia
-  // Normalize to handle case differences in carrera names from Excel
-  const studentGroupKey = `${materia.carrera.trim().toUpperCase()}|${materia.semestre.trim().toUpperCase()}|${materia.grupoCodigo.trim().toUpperCase()}`;
+  // Uses centralized normalization to handle inconsistencies from Excel data
+  const studentGroupKey = buildStudentGroupKey(materia.carrera, materia.semestre, materia.grupoCodigo);
 
   for (const dia of ordenDias) {
     if (dia === "Sábado" && !esVentanaSabadoValida(materia.turno, state)) continue;
@@ -446,7 +448,7 @@ function verificarDocenteGrupo(state: SchedulerState, docenteId: number, grupoCo
 function registrarAsignacion(state: SchedulerState, asig: Asignacion): void {
   state.asignaciones.push(asig);
 
-  const studentGroupKey = `${asig.carrera.trim().toUpperCase()}|${asig.semestre.trim().toUpperCase()}|${asig.grupoCodigo.trim().toUpperCase()}`;
+  const studentGroupKey = buildStudentGroupKey(asig.carrera, asig.semestre, asig.grupoCodigo);
 
   for (const slot of asig.slots) {
     // Mark docente as occupied
@@ -457,7 +459,7 @@ function registrarAsignacion(state: SchedulerState, asig: Asignacion): void {
     if (asig.espacioId !== null && !asig.esAIR) {
       state.espacioOcupado.set(`${asig.espacioId}|${asig.dia}|${slot}`, true);
     }
-    // Mark student group time as occupied (THIS is the key fix)
+    // Mark student group time as occupied
     state.estudiantesOcupados.set(`${studentGroupKey}|${asig.dia}|${slot}`, true);
   }
 
@@ -589,4 +591,28 @@ function shuffleArray<T>(array: T[]): T[] {
     [array[i], array[j]] = [array[j], array[i]];
   }
   return array;
+}
+
+// ─── STUDENT GROUP KEY NORMALIZATION ────────────────────────────────────────
+// Centralizes the logic for building a unique key that identifies a group of students.
+// This handles inconsistencies in the Excel data where the same group might appear with
+// slightly different encoding (e.g., "2AM" vs "2Am", extra spaces, accents, etc.)
+//
+// The key is: CARRERA|SEMESTRE|GRUPO_NORMALIZADO
+// Where GRUPO_NORMALIZADO removes accents, extra spaces, and normalizes case.
+
+function buildStudentGroupKey(carrera: string, semestre: string, grupoCodigo: string): string {
+  const normalizedCarrera = normalizeString(carrera);
+  const normalizedSemestre = normalizeString(semestre);
+  const normalizedGrupo = normalizeString(grupoCodigo);
+  return `${normalizedCarrera}|${normalizedSemestre}|${normalizedGrupo}`;
+}
+
+function normalizeString(s: string): string {
+  return s
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")                    // Decompose accented characters
+    .replace(/[\u0300-\u036f]/g, "")     // Remove diacritic marks (tildes, etc.)
+    .replace(/\s+/g, " ");               // Collapse multiple spaces into one
 }

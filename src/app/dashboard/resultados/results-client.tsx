@@ -124,9 +124,11 @@ function SemestreView({
   if (selectedSemestre !== "todos") filtered = filtered.filter((a) => a.semestre === selectedSemestre);
 
   // Group by carrera + semestre + grupoCodigo (each student group gets its own grid)
+  // Normalize grupoCodigo to handle inconsistencies in Excel data
   const groups = new Map<string, Asig[]>();
   for (const a of filtered) {
-    const key = `${a.carrera} — ${a.semestre}|${a.grupoCodigo}`;
+    const normalizedGrupo = a.grupoCodigo.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const key = `${a.carrera} — ${a.semestre}|${normalizedGrupo}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(a);
   }
