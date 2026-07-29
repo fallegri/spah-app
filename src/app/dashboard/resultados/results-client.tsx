@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Download, Calendar, AlertTriangle, Building, GraduationCap, Filter, List, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Download, AlertTriangle, Building, GraduationCap, Filter, List, X, ChevronDown, Cpu, Zap, Dna } from "lucide-react";
 
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const SLOTS = ["07:45","08:30","09:15","10:00","10:45","11:30","12:15","13:00","13:45","14:30","15:15","16:00","16:45","17:30","18:15","19:00","19:45","20:30","21:15","22:00","22:45"];
@@ -15,6 +16,25 @@ function calcEndTime(slotStart: string): string {
   return `${eh.toString().padStart(2, "0")}:${em.toString().padStart(2, "0")}`;
 }
 
+const ALGORITMO_LABELS: Record<string, { label: string; color: string; icon: typeof Cpu }> = {
+  iterativo: { label: "Iterativo", color: "text-blue-400", icon: Cpu },
+  greedy: { label: "Greedy", color: "text-emerald-400", icon: Zap },
+  genetico: { label: "Genetico", color: "text-purple-400", icon: Dna },
+};
+
+interface EjecucionSummary {
+  id: number;
+  gestion: string;
+  algoritmo: string;
+  totalAsignadas: number;
+  totalConflictos: number;
+  totalAIR: number;
+  totalSinDocente: number;
+  duracionMs: number;
+  activa: boolean;
+  createdAt: string;
+}
+
 interface Asig {
   id: number; materiaCodigo: string; materiaNombre: string; grupoCodigo: string;
   carrera: string; semestre: string; docenteNombre: string; espacioCodigo: string;
@@ -24,13 +44,15 @@ interface Asig {
 
 interface Props {
   data: {
-    ejecucion: { id: number; gestion: string; totalAsignadas: number; totalConflictos: number; totalAIR: number; totalSinDocente: number; duracionMs: number; createdAt: string };
+    ejecucion: { id: number; gestion: string; algoritmo: string; totalAsignadas: number; totalConflictos: number; totalAIR: number; totalSinDocente: number; duracionMs: number; createdAt: string };
     asignaciones: Asig[];
     conflictos: { id: number; materiaCodigo: string; materiaNombre: string; grupoCodigo: string; carrera: string; semestre: string; motivo: string }[];
   };
+  ejecuciones?: EjecucionSummary[];
 }
 
-export function ResultsClient({ data }: Props) {
+export function ResultsClient({ data, ejecuciones = [] }: Props) {
+  const router = useRouter();
   const { ejecucion, asignaciones, conflictos } = data;
   const [tab, setTab] = useState<"semestre" | "espacio" | "lista" | "conflictos">("semestre");
   const [selectedCarrera, setSelectedCarrera] = useState("todas");
@@ -38,6 +60,7 @@ export function ResultsClient({ data }: Props) {
   const [selectedTurno, setSelectedTurno] = useState("todos");
   const [selectedEspacio, setSelectedEspacio] = useState("todos");
   const [docenteModal, setDocenteModal] = useState<string | null>(null);
+  const [showExecSelector, setShowExecSelector] = useState(false);
 
   const carreras = [...new Set(asignaciones.map((a) => a.carrera))].sort();
   const semestres = [...new Set(asignaciones.map((a) => a.semestre))].sort();
@@ -48,14 +71,83 @@ export function ResultsClient({ data }: Props) {
     window.open(`/api/export?id=${ejecucion.id}`, "_blank");
   };
 
+  const handleSelectExecution = (id: number) => {
+    setShowExecSelector(false);
+    router.push(`/dashboard/resultados?ejecucionId=${id}`);
+  };
+
+  const algoInfo = ALGORITMO_LABELS[ejecucion.algoritmo] || ALGORITMO_LABELS.iterativo;
+  const AlgoIcon = algoInfo.icon;
+
   return (
     <div className="space-y-5">
+      {/* Execution Selector */}
+      {ejecuciones.length > 1 && (
+        <div className="relative">
+          <button
+            onClick={() => setShowExecSelector(!showExecSelector)}
+            className="w-full flex items-center justify-between px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl hover:border-gray-700 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <AlgoIcon className={`w-4 h-4 ${algoInfo.color}`} />
+              <span className="text-sm text-white font-medium">
+                Ejecucion #{ejecucion.id}
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded-full bg-gray-800 ${algoInfo.color}`}>
+                {algoInfo.label}
+              </span>
+              <span className="text-xs text-gray-500">
+                {ejecucion.gestion} - {new Date(ejecucion.createdAt).toLocaleString("es")}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">{ejecuciones.length} ejecuciones</span>
+              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showExecSelector ? "rotate-180" : ""}`} />
+            </div>
+          </button>
+
+          {showExecSelector && (
+            <div className="absolute z-40 top-full left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded-xl shadow-xl max-h-64 overflow-y-auto">
+              {ejecuciones.map((e) => {
+                const eAlgo = ALGORITMO_LABELS[e.algoritmo] || ALGORITMO_LABELS.iterativo;
+                const EAlgoIcon = eAlgo.icon;
+                const isSelected = e.id === ejecucion.id;
+                return (
+                  <button
+                    key={e.id}
+                    onClick={() => handleSelectExecution(e.id)}
+                    className={`w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-800 transition-colors ${
+                      isSelected ? "bg-gray-800/70 border-l-2 border-l-blue-500" : ""
+                    }`}
+                  >
+                    <EAlgoIcon className={`w-3.5 h-3.5 ${eAlgo.color}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-white font-medium">#{e.id}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded bg-gray-800 ${eAlgo.color}`}>{eAlgo.label}</span>
+                        <span className="text-[10px] text-gray-500">{e.gestion}</span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        <span className="text-[10px] text-emerald-400">{e.totalAsignadas} asig</span>
+                        <span className="text-[10px] text-red-400">{e.totalConflictos} conf</span>
+                        <span className="text-[10px] text-gray-500">{e.duracionMs}ms</span>
+                        <span className="text-[10px] text-gray-600">{new Date(e.createdAt).toLocaleString("es")}</span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Horario Generado</h1>
           <p className="text-gray-400 text-sm mt-1">
-            Ejecucion #{ejecucion.id} · {new Date(ejecucion.createdAt).toLocaleString("es")} · {ejecucion.gestion}
+            Ejecucion #{ejecucion.id} · <AlgoIcon className={`w-3 h-3 inline ${algoInfo.color}`} /> <span className={algoInfo.color}>{algoInfo.label}</span> · {new Date(ejecucion.createdAt).toLocaleString("es")} · {ejecucion.gestion}
           </p>
         </div>
         <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-sm text-white">

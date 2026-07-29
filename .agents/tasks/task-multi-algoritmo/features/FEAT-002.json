@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Update the UI to allow algorithm selection and support multi-process/gestion management. Users can select which algorithm to use, see previous executions listed, and start new processes without clearing the DB.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Update src/app/dashboard/scheduler/page.tsx: Add algorithm selector (radio buttons or dropdown) for 'Iterativo', 'Greedy con Scoring', 'Genetico'. Show genetic-specific params (population size, generations, mutation rate) only when genetico is selected. Wire the selected algorithm into the config sent to the API.",
     "Update src/app/dashboard/resultados/page.tsx: Instead of only showing the single active execution, fetch all executions and let the user pick which one to view. Show a list/table of past executions with: id, gestion, algorithm used, date, stats (assigned/conflicts). Keep the current detail view when an execution is selected.",

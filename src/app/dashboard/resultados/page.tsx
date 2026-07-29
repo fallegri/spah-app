@@ -4,17 +4,32 @@ import { eq, desc } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { ResultsClient } from "./results-client";
 
-export default async function ResultadosPage() {
+interface PageProps {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}
+
+export default async function ResultadosPage({ searchParams }: PageProps) {
   const session = await auth();
+  const params = await searchParams;
 
-  const [exec] = await db
-    .select()
+  // Fetch all executions for the selector
+  const allExecs = await db
+    .select({
+      id: ejecuciones.id,
+      gestion: ejecuciones.gestion,
+      algoritmo: ejecuciones.algoritmo,
+      totalAsignadas: ejecuciones.totalAsignadas,
+      totalConflictos: ejecuciones.totalConflictos,
+      totalAIR: ejecuciones.totalAIR,
+      totalSinDocente: ejecuciones.totalSinDocente,
+      duracionMs: ejecuciones.duracionMs,
+      activa: ejecuciones.activa,
+      createdAt: ejecuciones.createdAt,
+    })
     .from(ejecuciones)
-    .where(eq(ejecuciones.activa, true))
-    .orderBy(desc(ejecuciones.createdAt))
-    .limit(1);
+    .orderBy(desc(ejecuciones.createdAt));
 
-  if (!exec) {
+  if (allExecs.length === 0) {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-white">Resultados</h1>
@@ -26,6 +41,11 @@ export default async function ResultadosPage() {
     );
   }
 
+  // Determine which execution to display
+  const ejecucionIdParam = params?.ejecucionId;
+  const selectedId = ejecucionIdParam ? parseInt(ejecucionIdParam as string) : allExecs[0].id;
+  const exec = allExecs.find((e) => e.id === selectedId) || allExecs[0];
+
   const asigs = await db
     .select()
     .from(asignaciones)
@@ -36,11 +56,26 @@ export default async function ResultadosPage() {
     .from(conflictos)
     .where(eq(conflictos.ejecucionId, exec.id));
 
+  // Serialize executions list for client component
+  const ejecucionesList = allExecs.map((e) => ({
+    id: e.id,
+    gestion: e.gestion,
+    algoritmo: (e.algoritmo || "iterativo") as string,
+    totalAsignadas: e.totalAsignadas || 0,
+    totalConflictos: e.totalConflictos || 0,
+    totalAIR: e.totalAIR || 0,
+    totalSinDocente: e.totalSinDocente || 0,
+    duracionMs: e.duracionMs || 0,
+    activa: e.activa,
+    createdAt: e.createdAt.toISOString(),
+  }));
+
   // Serialize for client component
   const data = {
     ejecucion: {
       id: exec.id,
       gestion: exec.gestion,
+      algoritmo: (exec.algoritmo || "iterativo") as string,
       totalAsignadas: exec.totalAsignadas || 0,
       totalConflictos: exec.totalConflictos || 0,
       totalAIR: exec.totalAIR || 0,
@@ -75,5 +110,5 @@ export default async function ResultadosPage() {
     })),
   };
 
-  return <ResultsClient data={data} />;
+  return <ResultsClient data={data} ejecuciones={ejecucionesList} />;
 }
