@@ -15,13 +15,13 @@ export const SLOTS: string[] = [
 
 // SRS Sección 2.3: Turnos y Slots Horarios
 // Mañana: 07:45 – 14:30 → 9 bloques de 45 min
-// Tarde:  13:00 – 18:15 → 7 bloques (solapamiento con Mañana en 13:00-14:30)
+// Tarde:  13:45 – 18:15 → 6 bloques
 // Noche:  18:15 – 22:45 → 6 bloques
-// NOTA: El solapamiento Mañana/Tarde (13:00, 13:45) permite que docentes con
+// NOTA: El solapamiento Mañana/Tarde (13:45-14:30) permite que docentes con
 // disponibilidad en ambos turnos puedan dictar en ese rango.
 export const TURNOS_SLOTS: Record<Turno, string[]> = {
   "Mañana": ["07:45", "08:30", "09:15", "10:00", "10:45", "11:30", "12:15", "13:00", "13:45"],
-  "Tarde": ["13:00", "13:45", "14:30", "15:15", "16:00", "16:45", "17:30"],
+  "Tarde": ["13:45", "14:30", "15:15", "16:00", "16:45", "17:30"],
   "Noche": ["18:15", "19:00", "19:45", "20:30", "21:15", "22:00"],
 };
 

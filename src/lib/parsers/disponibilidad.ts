@@ -17,7 +17,7 @@ interface ParseResult {
 }
 
 const CI_REGEX = /^c\.?i\.?:?$/i;
-const MARCA_DISPONIBLE = /^(x|si|sí|1|true)$/i;
+const MARCA_NO_DISPONIBLE = /^(no|n|0|false|-)$/i;
 
 export function parseDisponibilidadIndividual(buffer: ArrayBuffer): ParseResult {
   const workbook = XLSX.read(buffer, { type: "array" });
@@ -118,7 +118,9 @@ export function parseDisponibilidadIndividual(buffer: ArrayBuffer): ParseResult 
 
     for (const [dia, col] of Object.entries(dayColumns)) {
       const cell = String(row[col] || "").trim();
-      if (MARCA_DISPONIBLE.test(cell)) {
+      // REGLA: cualquier marca = disponible. Solo vacío o "NO" = no disponible.
+      const isNotAvailable = cell === "" || MARCA_NO_DISPONIBLE.test(cell);
+      if (!isNotAvailable) {
         disponibilidad.push({ dia: dia as Dia, slot });
       }
     }

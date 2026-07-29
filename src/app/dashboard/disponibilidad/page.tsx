@@ -43,10 +43,10 @@ export default function DisponibilidadPage() {
   };
 
   const toggleTurno = (turno: "manana" | "tarde" | "noche") => {
-    // SRS 2.3: Mañana 07:45-14:30 (9 bloques), Tarde 13:00-18:15 (7 bloques), Noche 18:15-22:45 (6 bloques)
+    // Turnos: Mañana 07:45-14:30 (idx 0-8), Tarde 13:45-18:15 (idx 8-13), Noche 18:15-22:45 (idx 14-19)
     const turnoSlots =
       turno === "manana" ? SLOTS.slice(0, 9) :
-      turno === "tarde" ? SLOTS.slice(7, 14) : SLOTS.slice(14, 20);
+      turno === "tarde" ? SLOTS.slice(8, 14) : SLOTS.slice(14, 20);
 
     const allSelected = DIAS.slice(0, 6).every((dia) =>
       turnoSlots.every((slot) => grid[`${dia}|${slot}`])

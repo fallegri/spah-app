@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Download, Calendar, AlertTriangle, Building, GraduationCap, Filter, List } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Download, Calendar, AlertTriangle, Building, GraduationCap, Filter, List, X } from "lucide-react";
 
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const SLOTS = ["07:45","08:30","09:15","10:00","10:45","11:30","12:15","13:00","13:45","14:30","15:15","16:00","16:45","17:30","18:15","19:00","19:45","20:30","21:15","22:00","22:45"];
@@ -27,6 +27,7 @@ export function ResultsClient({ data }: Props) {
   const [selectedCarrera, setSelectedCarrera] = useState("todas");
   const [selectedSemestre, setSelectedSemestre] = useState("todos");
   const [selectedEspacio, setSelectedEspacio] = useState("todos");
+  const [docenteModal, setDocenteModal] = useState<string | null>(null);
 
   const carreras = [...new Set(asignaciones.map((a) => a.carrera))].sort();
   const semestres = [...new Set(asignaciones.map((a) => a.semestre))].sort();
@@ -93,6 +94,7 @@ export function ResultsClient({ data }: Props) {
           setSelectedCarrera={setSelectedCarrera}
           selectedSemestre={selectedSemestre}
           setSelectedSemestre={setSelectedSemestre}
+          onDocenteClick={setDocenteModal}
         />
       )}
       {tab === "espacio" && (
@@ -105,6 +107,11 @@ export function ResultsClient({ data }: Props) {
       )}
       {tab === "lista" && <ListView asignaciones={asignaciones} />}
       {tab === "conflictos" && <ConflictosView conflictos={conflictos} />}
+
+      {/* Modal de disponibilidad docente */}
+      {docenteModal && (
+        <DocenteDisponibilidadModal nombre={docenteModal} onClose={() => setDocenteModal(null)} />
+      )}
     </div>
   );
 }
@@ -112,11 +119,12 @@ export function ResultsClient({ data }: Props) {
 // ─── VIEW: POR SEMESTRE ─────────────────────────────────────────────────────
 
 function SemestreView({
-  asignaciones, carreras, semestres, selectedCarrera, setSelectedCarrera, selectedSemestre, setSelectedSemestre,
+  asignaciones, carreras, semestres, selectedCarrera, setSelectedCarrera, selectedSemestre, setSelectedSemestre, onDocenteClick,
 }: {
   asignaciones: Asig[]; carreras: string[]; semestres: string[];
   selectedCarrera: string; setSelectedCarrera: (v: string) => void;
   selectedSemestre: string; setSelectedSemestre: (v: string) => void;
+  onDocenteClick?: (nombre: string) => void;
 }) {
   // Filter
   let filtered = asignaciones;
@@ -159,7 +167,7 @@ function SemestreView({
             <p className="text-[11px] text-gray-400">{asigs.length} sesiones · Grupo: {grupoCodigo}</p>
           </div>
           <div className="p-3">
-            <TimetableGrid asignaciones={asigs} showDocente={true} />
+            <TimetableGrid asignaciones={asigs} showDocente={true} onDocenteClick={onDocenteClick} />
           </div>
         </div>
         );
@@ -224,7 +232,7 @@ function EspacioView({
 
 // ─── SHARED TIMETABLE GRID ──────────────────────────────────────────────────
 
-function TimetableGrid({ asignaciones, showDocente = false, showCarrera = false }: { asignaciones: Asig[]; showDocente?: boolean; showCarrera?: boolean }) {
+function TimetableGrid({ asignaciones, showDocente = false, showCarrera = false, onDocenteClick }: { asignaciones: Asig[]; showDocente?: boolean; showCarrera?: boolean; onDocenteClick?: (nombre: string) => void }) {
   // Determine which slots have data to avoid showing empty rows
   const usedSlots = new Set<string>();
   for (const a of asignaciones) {
@@ -315,7 +323,7 @@ function TimetableGrid({ asignaciones, showDocente = false, showCarrera = false 
                       >
                         <div className="font-bold">{a.materiaCodigo}</div>
                         <div className="truncate opacity-80">{a.materiaNombre}</div>
-                        {showDocente && <div className="text-[9px] opacity-70 mt-0.5">{"\u{1F464}"} {a.docenteNombre}</div>}
+                        {showDocente && <div className="text-[9px] opacity-70 mt-0.5 cursor-pointer hover:underline" onClick={() => onDocenteClick?.(a.docenteNombre)}>{"\u{1F464}"} {a.docenteNombre}</div>}
                         {showCarrera && <div className="text-[9px] opacity-70 mt-0.5">{"\u{1F4DA}"} {a.carrera.split(" ").slice(0,3).join(" ")}</div>}
                         <div className="text-[9px] opacity-60 mt-0.5">
                           {!showCarrera && `\u{1F4CD} ${a.espacioCodigo}`}
@@ -434,6 +442,74 @@ function Stat({ label, value, color }: { label: string; value: any; color: strin
     <div className={`${bgColor} border border-gray-800 rounded-xl p-3`}>
       <p className="text-[10px] text-gray-400 uppercase">{label}</p>
       <p className={`text-lg font-bold ${textColor}`}>{value}</p>
+    </div>
+  );
+}
+
+// ─── MODAL: DISPONIBILIDAD DOCENTE ──────────────────────────────────────────
+
+const MODAL_DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+const MODAL_SLOTS = ["07:45","08:30","09:15","10:00","10:45","11:30","12:15","13:00","13:45","14:30","15:15","16:00","16:45","17:30","18:15","19:00","19:45","20:30","21:15","22:00"];
+
+function DocenteDisponibilidadModal({ nombre, onClose }: { nombre: string; onClose: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<{ docente: { nombre: string; ci: string }; totalSlots: number; disponibilidad: { dia: string; slot: string }[] } | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/docentes/disponibilidad?nombre=${encodeURIComponent(nombre)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) setError(d.error);
+        else setData(d);
+        setLoading(false);
+      })
+      .catch((e) => { setError(e.message); setLoading(false); });
+  }, [nombre]);
+
+  const isAvailable = (dia: string, slot: string) =>
+    data?.disponibilidad.some((d) => d.dia === dia && d.slot === slot) || false;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-4xl w-full max-h-[85vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
+          <div>
+            <h3 className="text-sm font-bold text-white">Disponibilidad: {nombre}</h3>
+            {data && <p className="text-[11px] text-gray-400">{data.totalSlots} slots disponibles</p>}
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-gray-800 rounded"><X className="w-4 h-4 text-gray-400" /></button>
+        </div>
+
+        <div className="p-4 overflow-x-auto">
+          {loading && <p className="text-center text-gray-400 py-8">Cargando disponibilidad...</p>}
+          {error && <p className="text-center text-red-400 py-8">{error}</p>}
+          {data && (
+            <table className="w-full text-[10px] border-collapse">
+              <thead>
+                <tr>
+                  <th className="px-1 py-1 text-gray-500 w-12">Hora</th>
+                  {MODAL_DIAS.map((d) => (
+                    <th key={d} className="px-1 py-1 text-gray-400 text-center">{d.slice(0, 3)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {MODAL_SLOTS.map((slot) => (
+                  <tr key={slot}>
+                    <td className="px-1 py-0.5 text-gray-600 font-mono">{slot}</td>
+                    {MODAL_DIAS.map((dia) => (
+                      <td key={`${dia}|${slot}`} className="px-0.5 py-0.5 text-center">
+                        <div className={`w-full h-4 rounded-sm ${isAvailable(dia, slot) ? "bg-emerald-600/60" : "bg-gray-800"}`} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

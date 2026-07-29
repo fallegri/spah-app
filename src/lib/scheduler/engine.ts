@@ -492,8 +492,6 @@ function intentarAsignarSesion(
           if (!verificarHabilitacion(docente, materia.codigo)) continue;
           // HC-01: Docente can't be in two places at once
           if (verificarSolapamientoDocente(state, docente.id, dia, ventana.slots)) continue;
-          // HC-13: Docente can't teach 2 different subjects to same grupoCodigo
-          if (verificarDocenteGrupo(state, docente.id, materia.grupoCodigo, materia.codigo)) continue;
         }
 
         for (const espacio of espaciosCand) {
@@ -684,7 +682,7 @@ function generarVentanas(nBloques: number, turno: string, state: SchedulerState)
 
 // SC-BRIDGE: Orders windows to prefer those adjacent to existing group assignments on the same day.
 // This prevents "puentes" (free periods between classes) for the student group.
-// Score: 0 = directly adjacent (best), higher = more gap slots between this window and existing classes.
+// Priority: gap=0 (adjacent) > gap=1 (max allowed bridge) > gap>1 (strongly penalized)
 function ordenarVentanasSinPuentes(
   ventanas: Ventana[], state: SchedulerState, studentGroupKey: string, dia: Dia
 ): Ventana[] {
@@ -696,34 +694,39 @@ function ordenarVentanasSinPuentes(
     }
   }
 
-  // If no existing classes on this day, no bridge concern — return original order
-  if (occupiedSlotIndices.length === 0) return ventanas;
+  // If no existing classes on this day, prefer earlier slots (fills schedule from start)
+  if (occupiedSlotIndices.length === 0) {
+    return [...ventanas]; // Already ordered by start time
+  }
 
   const minOccupied = Math.min(...occupiedSlotIndices);
   const maxOccupied = Math.max(...occupiedSlotIndices);
 
-  // Score each window: how many gap slots would exist between this window and existing classes
+  // Score each window by gap distance
   const scored = ventanas.map((v) => {
     const windowStart = SLOTS.indexOf(v.slots[0]);
     const windowEnd = SLOTS.indexOf(v.slots[v.slots.length - 1]);
 
     let gapScore: number;
     if (windowEnd < minOccupied) {
-      // Window is entirely before existing classes — gap = distance between them
+      // Window is entirely before existing classes
       gapScore = minOccupied - windowEnd - 1;
     } else if (windowStart > maxOccupied) {
-      // Window is entirely after existing classes — gap = distance between them
+      // Window is entirely after existing classes
       gapScore = windowStart - maxOccupied - 1;
     } else {
-      // Window overlaps or is adjacent — perfect (score 0)
+      // Window overlaps or is adjacent — perfect
       gapScore = 0;
     }
 
-    return { ventana: v, gapScore };
+    // Strongly penalize gaps > 1 period (make them very unlikely to be chosen)
+    const penalty = gapScore > 1 ? gapScore * 100 : gapScore;
+
+    return { ventana: v, penalty };
   });
 
-  // Sort: smallest gap first (0 = adjacent = best)
-  scored.sort((a, b) => a.gapScore - b.gapScore);
+  // Sort: smallest penalty first
+  scored.sort((a, b) => a.penalty - b.penalty);
   return scored.map((s) => s.ventana);
 }
 
