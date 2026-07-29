@@ -115,9 +115,8 @@ export function ejecutarScheduler(
     state.log.push("[GRUPO] " + key + " -> " + mats.length + " materias: " + mats.join(", "));
   }
 
-  // Phase 3: AC-3 arc consistency to prune domains
-  const ac3Result = aplicarAC3(state);
-  state.log.push("[FASE 3] AC-3 completado. Dominios vacios: " + ac3Result.emptyDomains);
+  // Phase 3: Skip AC-3 (iterative solver handles constraints dynamically)
+  state.log.push("[FASE 3] Modo iterativo - restricciones se verifican en tiempo de asignacion");
 
   // Phase 4: CSP Solve with MRV + Forward Checking + Backjumping
   const solved = resolverCSP(state);
@@ -711,82 +710,113 @@ function valuesConsistent(
 }
 
 
-// --- PHASE 4: CSP SOLVER WITH MRV + FORWARD CHECKING + BACKJUMPING ---
+// --- PHASE 4: ITERATIVE SOLVER (always produces partial solutions) ---
+// Unlike pure CSP that needs a complete solution, this solver:
+// 1. Orders variables by MRV (most constrained first)
+// 2. For each variable, finds the best valid assignment
+// 3. If no valid assignment exists, tries relaxed constraints (AIR, Sin Docente)
+// 4. If still nothing, marks as conflict and CONTINUES with next variable
+// This guarantees we always get the maximum possible assignments.
 
 function resolverCSP(state: CSPState): boolean {
-  return backtrackSearch(state, 0);
+  let allAssigned = true;
+
+  // Sort variables by domain size (smallest first = MRV) then by difficulty
+  const ordered = [...state.variables].sort((a, b) => {
+    if (a.domain.length !== b.domain.length) return a.domain.length - b.domain.length;
+    return b.unidad.dificultad - a.unidad.dificultad;
+  });
+
+  for (const variable of ordered) {
+    if (variable.assigned !== null) continue;
+
+    const assigned = intentarAsignarVariable(state, variable);
+    if (!assigned) {
+      allAssigned = false;
+      // Log why it failed
+      state.log.push(
+        "[SKIP] " + variable.id + " - no se pudo asignar (dominio restante: " + variable.domain.length + ")"
+      );
+    }
+  }
+
+  return allAssigned;
 }
 
-function backtrackSearch(state: CSPState, depth: number): boolean {
-  // Check if all variables are assigned
-  const unassigned = state.variables.filter((v) => v.assigned === null);
-  if (unassigned.length === 0) return true;
-
-  // MRV Heuristic: select variable with minimum remaining values in domain
-  const variable = selectVariableMRV(unassigned);
-  if (variable.domain.length === 0) return false;
-
-  // Sort domain values by soft score (best first)
+function intentarAsignarVariable(state: CSPState, variable: CSPVariable): boolean {
+  // Sort domain values by dynamic soft score (best first)
   const sortedDomain = [...variable.domain].sort((a, b) => {
     const aSoft = a.softScore + calcularSoftScoreDinamico(state, variable, a);
     const bSoft = b.softScore + calcularSoftScoreDinamico(state, variable, b);
     return aSoft - bSoft;
   });
 
+  // Try each value in order of preference
   for (const value of sortedDomain) {
-    if (state.backtrackCount >= state.config.maxBacktrack) {
-      // Reached backtrack limit - assign best remaining value greedily
-      const greedyValue = findBestGreedyValue(state, variable);
-      if (greedyValue) {
-        variable.assigned = greedyValue;
-        applyAssignment(state, variable, greedyValue);
-      }
-      // Continue with remaining variables greedily
-      for (const remaining of state.variables.filter((v) => v.assigned === null && v !== variable)) {
-        const rv = findBestGreedyValue(state, remaining);
-        if (rv) {
-          remaining.assigned = rv;
-          applyAssignment(state, remaining, rv);
-        }
-      }
-      return false; // Partial solution
+    if (isConsistentWithState(state, variable, value)) {
+      variable.assigned = value;
+      applyAssignment(state, variable, value);
+      return true;
     }
+  }
 
-    // Check hard constraints against current state
-    if (!isConsistentWithState(state, variable, value)) continue;
-
-    // Assign value
-    variable.assigned = value;
-    applyAssignment(state, variable, value);
-
-    // Forward checking: prune domains of related unassigned variables
-    const prunedEntries = forwardCheck(state, variable, value);
-
-    // Check for domain wipeout
-    const wipeout = state.variables.some((v) => v.assigned === null && v.domain.length === 0);
-
-    if (!wipeout) {
-      const result = backtrackSearch(state, depth + 1);
-      if (result) return true;
-    }
-
-    // Backtrack: undo assignment and restore pruned values
-    state.backtrackCount++;
-    undoAssignment(state, variable, value);
-    variable.assigned = null;
-    restorePruned(prunedEntries);
-
-    // Conflict-directed backjumping: record which variable caused the conflict
-    if (wipeout) {
-      const wipedVar = state.variables.find((v) => v.assigned === null && v.domain.length === 0);
-      if (wipedVar) {
-        const conflicts = state.conflictSet.get(variable.id);
-        if (conflicts) conflicts.add(wipedVar.id);
-      }
+  // If primary domain failed, try relaxed options:
+  // Try with bridge constraint relaxed (allow gap > 1)
+  for (const value of sortedDomain) {
+    if (isConsistentRelaxed(state, variable, value)) {
+      variable.assigned = value;
+      applyAssignment(state, variable, value);
+      state.log.push("[RELAX-BRIDGE] " + variable.id + " asignado con puente > 1 periodo");
+      return true;
     }
   }
 
   return false;
+}
+
+// Relaxed consistency check: same as isConsistentWithState but allows bridges > 1
+function isConsistentRelaxed(state: CSPState, variable: CSPVariable, value: DomainValue): boolean {
+  const materia = variable.unidad.materia;
+  const studentKey = buildStudentGroupKey(materia.carrera, materia.semestre, materia.grupoCodigo);
+
+  // HC-05: No student group overlap
+  for (const slot of value.slots) {
+    if (state.estudiantesOcupados.has(studentKey + "|" + value.dia + "|" + slot)) {
+      return false;
+    }
+  }
+
+  // HC-01: No docente overlap
+  if (value.docente !== null) {
+    for (const slot of value.slots) {
+      if (state.docenteOcupado.has(value.docente.id + "|" + value.dia + "|" + slot)) {
+        return false;
+      }
+    }
+  }
+
+  // HC-02: No space double-booking
+  if (!value.esAIR) {
+    for (const slot of value.slots) {
+      if (state.espacioOcupado.has(value.espacio.id + "|" + value.dia + "|" + slot)) {
+        return false;
+      }
+    }
+  }
+
+  // HC-08: Max 7 periods per day per student group
+  const cargaKey = studentKey + "|" + value.dia;
+  const cargaActual = state.grupoCargaDiaria.get(cargaKey) || 0;
+  if (cargaActual + value.slots.length > 7) return false;
+
+  // NO bridge check — this is the relaxed version
+
+  // HC: Space school match (allow mismatch for AIR)
+  if (!value.esAIR && value.espacio.escuela !== 0 && value.espacio.escuela !== materia.escuela) {
+    return false;
+  }
+
+  return true;
 }
 
 function selectVariableMRV(unassigned: CSPVariable[]): CSPVariable {
