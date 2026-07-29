@@ -97,7 +97,8 @@ export function ejecutarScheduler(
   // Phase 2: Main scheduling loop
   for (const unidad of unidades) {
     for (let sesIdx = 0; sesIdx < unidad.sesiones.length; sesIdx++) {
-      const nBloques = unidad.sesiones[sesIdx];
+      // HARD RULE: minimum 2 periods per session — never schedule just 1
+      const nBloques = Math.max(unidad.sesiones[sesIdx], 2);
       const resultado = intentarConBacktracking(state, unidad, nBloques, sesIdx);
 
       if (resultado) {
@@ -278,7 +279,8 @@ function repartirEnSesiones(horas: number, maxPorSesion: number, tipoAula: TipoE
     return [horas];
   }
   if (horas === 1) {
-    return [1]; // Edge case: 1h subject (shouldn't happen per business rules)
+    // NEVER program a single period — bump to minimum 2
+    return [2];
   }
 
   // Calculate how many sessions we need
