@@ -125,6 +125,23 @@ export function ejecutarScheduler(
     `[FIN] Completado en ${duracion}ms. Asignadas: ${state.asignaciones.length}, Conflictos: ${state.conflictos.length}`
   );
 
+  // ═══ POST-GENERATION VALIDATION ═══
+  // Detect any HC-05 violations (student group overlaps) that might have slipped through
+  const overlapCheck = new Map<string, string>(); // `${studentGroupKey}|${dia}|${slot}` -> materiaCodigo
+  for (const a of state.asignaciones) {
+    const sgk = `${a.carrera.trim().toUpperCase()}|${a.semestre.trim().toUpperCase()}|${a.grupoCodigo.trim().toUpperCase()}`;
+    for (const slot of a.slots) {
+      const key = `${sgk}|${a.dia}|${slot}`;
+      const existing = overlapCheck.get(key);
+      if (existing && existing !== a.materiaCodigo) {
+        state.log.push(
+          `[WARN-HC05] CRUCE DETECTADO: Grupo ${a.grupoCodigo} (${a.carrera}|${a.semestre}) tiene ${existing} y ${a.materiaCodigo} en ${a.dia} ${slot}`
+        );
+      }
+      overlapCheck.set(key, a.materiaCodigo);
+    }
+  }
+
   return {
     asignaciones: state.asignaciones,
     conflictos: state.conflictos,

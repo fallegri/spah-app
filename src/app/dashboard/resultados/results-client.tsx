@@ -123,10 +123,10 @@ function SemestreView({
   if (selectedCarrera !== "todas") filtered = filtered.filter((a) => a.carrera === selectedCarrera);
   if (selectedSemestre !== "todos") filtered = filtered.filter((a) => a.semestre === selectedSemestre);
 
-  // Group by carrera + semestre
+  // Group by carrera + semestre + grupoCodigo (each student group gets its own grid)
   const groups = new Map<string, Asig[]>();
   for (const a of filtered) {
-    const key = `${a.carrera} — ${a.semestre}`;
+    const key = `${a.carrera} — ${a.semestre}|${a.grupoCodigo}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(a);
   }
@@ -148,17 +148,20 @@ function SemestreView({
       </div>
 
       {/* One grid per group */}
-      {Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([groupName, asigs]) => (
-        <div key={groupName} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      {Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([groupKey, asigs]) => {
+        const [carreraSemestre, grupoCodigo] = groupKey.split("|");
+        return (
+        <div key={groupKey} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           <div className="px-4 py-3 bg-gray-800/50 border-b border-gray-800">
-            <h3 className="text-sm font-semibold text-white">{groupName}</h3>
-            <p className="text-[11px] text-gray-400">{asigs.length} sesiones · Grupo: {asigs[0]?.grupoCodigo}</p>
+            <h3 className="text-sm font-semibold text-white">{carreraSemestre}</h3>
+            <p className="text-[11px] text-gray-400">{asigs.length} sesiones · Grupo: {grupoCodigo}</p>
           </div>
           <div className="p-3">
             <TimetableGrid asignaciones={asigs} showDocente={true} />
           </div>
         </div>
-      ))}
+        );
+      })}
 
       {groups.size === 0 && (
         <div className="text-center py-8 text-gray-500">No hay asignaciones con los filtros seleccionados.</div>
@@ -231,73 +234,94 @@ function TimetableGrid({ asignaciones, showDocente = false, showCarrera = false 
     return <p className="text-xs text-gray-500 text-center py-4">Sin sesiones asignadas.</p>;
   }
 
-  const getAsigAt = (dia: string, slot: string) =>
-    asignaciones.filter((a) => a.dia === dia && a.slots.includes(slot));
+  // Build a lookup: for each (dia, slot) → the assignment that STARTS there
+  const startingAt = new Map<string, Asig[]>();
+  for (const a of asignaciones) {
+    const key = `${a.dia}|${a.slots[0]}`;
+    if (!startingAt.has(key)) startingAt.set(key, []);
+    startingAt.get(key)!.push(a);
+  }
 
-  // Track which cells are already rendered (for spanning)
-  const rendered = new Set<string>();
+  // Track which cells are consumed by a rowSpan from a previous row
+  const spannedCells = new Set<string>();
+
+  // Pre-calculate spans: for each assignment starting at (dia, slot), 
+  // calculate how many VISIBLE rows it spans
+  const getVisibleSpan = (a: Asig): number => {
+    let span = 0;
+    for (const s of a.slots) {
+      if (visibleSlots.includes(s)) span++;
+    }
+    return Math.max(span, 1);
+  };
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-xs border-collapse">
+      <table className="w-full text-xs border-collapse table-fixed">
         <thead>
           <tr>
             <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-14 border-b border-gray-800">Hora</th>
             {DIAS.map((d) => (
-              <th key={d} className="px-2 py-1.5 text-center text-gray-400 font-medium border-b border-gray-800 min-w-[120px]">{d}</th>
+              <th key={d} className="px-2 py-1.5 text-center text-gray-400 font-medium border-b border-gray-800">{d}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {visibleSlots.map((slot, idx) => (
-            <tr key={slot}>
+          {visibleSlots.map((slot) => (
+            <tr key={slot} style={{ height: "36px" }}>
               <td className="px-2 py-1 text-gray-600 font-mono text-[10px] border-r border-gray-800 align-top">{slot}</td>
               {DIAS.map((dia) => {
                 const cellKey = `${dia}|${slot}`;
-                if (rendered.has(cellKey)) return null;
 
-                const cells = getAsigAt(dia, slot);
-                if (cells.length === 0) {
+                // If this cell is consumed by a rowSpan from above, skip rendering it
+                if (spannedCells.has(cellKey)) return null;
+
+                const startingHere = startingAt.get(cellKey) || [];
+
+                if (startingHere.length === 0) {
                   return <td key={cellKey} className="px-1 py-0.5 border-b border-gray-800/50" />;
                 }
 
+                // Use the max span among all assignments starting here
+                // (normally should be 1 assignment per cell after HC-05 fix)
+                const maxSpan = Math.max(...startingHere.map(getVisibleSpan));
+
+                // Mark all future cells in this column as spanned
+                const slotIdx = visibleSlots.indexOf(slot);
+                for (let i = 1; i < maxSpan; i++) {
+                  if (slotIdx + i < visibleSlots.length) {
+                    spannedCells.add(`${dia}|${visibleSlots[slotIdx + i]}`);
+                  }
+                }
+
                 return (
-                  <td key={cellKey} className="px-1 py-0.5 align-top border-b border-gray-800/50">
-                    {cells.map((a) => {
-                      // Only show on first slot of the session
-                      if (a.slots[0] !== slot) return null;
-
-                      // Mark remaining slots as rendered
-                      for (const s of a.slots.slice(1)) {
-                        rendered.add(`${dia}|${s}`);
-                      }
-
-                      const height = a.slots.length;
-
-                      return (
-                        <div
-                          key={a.id}
-                          className={`px-2 py-1.5 rounded text-[10px] leading-tight mb-0.5 ${
-                            a.esAIR ? "bg-amber-900/40 border border-amber-700/60 text-amber-200" :
-                            a.esSinDocente ? "bg-orange-900/40 border border-orange-700/60 text-orange-200" :
-                            a.tipoEspacio === "LABORATORIO" ? "bg-blue-900/30 border border-blue-800/60 text-blue-200" :
-                            a.tipoEspacio === "TALLER" ? "bg-purple-900/30 border border-purple-800/60 text-purple-200" :
-                            "bg-gray-800 border border-gray-700 text-gray-200"
-                          }`}
-                          style={{ minHeight: `${height * 24}px` }}
-                        >
-                          <div className="font-bold">{a.materiaCodigo}</div>
-                          <div className="truncate opacity-80">{a.materiaNombre}</div>
-                          {showDocente && <div className="text-[9px] opacity-70 mt-0.5">👤 {a.docenteNombre}</div>}
-                          {showCarrera && <div className="text-[9px] opacity-70 mt-0.5">📚 {a.carrera.split(" ").slice(0,3).join(" ")}</div>}
-                          <div className="text-[9px] opacity-60 mt-0.5">
-                            {!showCarrera && `📍 ${a.espacioCodigo}`}
-                            {showCarrera && `👤 ${a.docenteNombre?.split(" ").slice(0,2).join(" ")}`}
-                            {` · ${a.slots[0]}-${a.slots[a.slots.length-1]}`}
-                          </div>
+                  <td
+                    key={cellKey}
+                    rowSpan={maxSpan}
+                    className="px-1 py-0.5 align-top border-b border-gray-800/50"
+                  >
+                    {startingHere.map((a) => (
+                      <div
+                        key={a.id}
+                        className={`px-2 py-1.5 rounded text-[10px] leading-tight mb-0.5 h-full ${
+                          a.esAIR ? "bg-amber-900/40 border border-amber-700/60 text-amber-200" :
+                          a.esSinDocente ? "bg-orange-900/40 border border-orange-700/60 text-orange-200" :
+                          a.tipoEspacio === "LABORATORIO" ? "bg-blue-900/30 border border-blue-800/60 text-blue-200" :
+                          a.tipoEspacio === "TALLER" ? "bg-purple-900/30 border border-purple-800/60 text-purple-200" :
+                          "bg-gray-800 border border-gray-700 text-gray-200"
+                        }`}
+                      >
+                        <div className="font-bold">{a.materiaCodigo}</div>
+                        <div className="truncate opacity-80">{a.materiaNombre}</div>
+                        {showDocente && <div className="text-[9px] opacity-70 mt-0.5">{"\u{1F464}"} {a.docenteNombre}</div>}
+                        {showCarrera && <div className="text-[9px] opacity-70 mt-0.5">{"\u{1F4DA}"} {a.carrera.split(" ").slice(0,3).join(" ")}</div>}
+                        <div className="text-[9px] opacity-60 mt-0.5">
+                          {!showCarrera && `\u{1F4CD} ${a.espacioCodigo}`}
+                          {showCarrera && `\u{1F464} ${a.docenteNombre?.split(" ").slice(0,2).join(" ")}`}
+                          {` \u00B7 ${a.slots[0]}-${a.slots[a.slots.length-1]}`}
                         </div>
-                      );
-                    })}
+                      </div>
+                    ))}
                   </td>
                 );
               })}
