@@ -253,13 +253,11 @@ function EspacioView({
 // ─── SHARED TIMETABLE GRID ──────────────────────────────────────────────────
 
 function TimetableGrid({ asignaciones, showDocente = false, showCarrera = false, onDocenteClick }: { asignaciones: Asig[]; showDocente?: boolean; showCarrera?: boolean; onDocenteClick?: (nombre: string) => void }) {
-  // Determine which slots have data to avoid showing empty rows
+  // Determine visible slots range (all slots between min and max used)
   const usedSlots = new Set<string>();
   for (const a of asignaciones) {
     for (const s of a.slots) usedSlots.add(s);
   }
-  // Include ALL slots between min and max used (no gaps in grid)
-  // This ensures rowSpan works correctly for multi-period sessions
   const usedIndices = [...usedSlots].map((s) => SLOTS.indexOf(s)).filter((i) => i >= 0);
   if (usedIndices.length === 0) {
     return <p className="text-xs text-gray-500 text-center py-4">Sin sesiones asignadas.</p>;
@@ -268,26 +266,13 @@ function TimetableGrid({ asignaciones, showDocente = false, showCarrera = false,
   const maxIdx = Math.max(...usedIndices);
   const visibleSlots = SLOTS.slice(minIdx, maxIdx + 1);
 
-  // Build a lookup: for each (dia, slot) → the assignment that STARTS there
-  const startingAt = new Map<string, Asig[]>();
+  // Build lookup: for each (dia, slot) → assignment occupying that cell
+  const cellMap = new Map<string, Asig>();
   for (const a of asignaciones) {
-    const key = `${a.dia}|${a.slots[0]}`;
-    if (!startingAt.has(key)) startingAt.set(key, []);
-    startingAt.get(key)!.push(a);
-  }
-
-  // Track which cells are consumed by a rowSpan from a previous row
-  const spannedCells = new Set<string>();
-
-  // Pre-calculate spans: for each assignment starting at (dia, slot), 
-  // calculate how many VISIBLE rows it spans
-  const getVisibleSpan = (a: Asig): number => {
-    let span = 0;
     for (const s of a.slots) {
-      if (visibleSlots.includes(s)) span++;
+      cellMap.set(`${a.dia}|${s}`, a);
     }
-    return Math.max(span, 1);
-  };
+  }
 
   return (
     <div className="overflow-x-auto">
@@ -302,60 +287,45 @@ function TimetableGrid({ asignaciones, showDocente = false, showCarrera = false,
         </thead>
         <tbody>
           {visibleSlots.map((slot) => (
-            <tr key={slot} style={{ height: "36px" }}>
-              <td className="px-2 py-1 text-gray-600 font-mono text-[10px] border-r border-gray-800 align-top">{slot}</td>
+            <tr key={slot} style={{ height: "32px" }}>
+              <td className="px-2 py-0.5 text-gray-600 font-mono text-[10px] border-r border-gray-800 align-middle">{slot}</td>
               {DIAS.map((dia) => {
                 const cellKey = `${dia}|${slot}`;
+                const a = cellMap.get(cellKey);
 
-                // If this cell is consumed by a rowSpan from above, skip rendering it
-                if (spannedCells.has(cellKey)) return null;
-
-                const startingHere = startingAt.get(cellKey) || [];
-
-                if (startingHere.length === 0) {
-                  return <td key={cellKey} className="px-1 py-0.5 border-b border-gray-800/50" />;
+                if (!a) {
+                  return <td key={cellKey} className="px-0.5 py-0.5 border-b border-gray-800/30" />;
                 }
 
-                // Use the max span among all assignments starting here
-                // (normally should be 1 assignment per cell after HC-05 fix)
-                const maxSpan = Math.max(...startingHere.map(getVisibleSpan));
-
-                // Mark all future cells in this column as spanned
-                const slotIdx = visibleSlots.indexOf(slot);
-                for (let i = 1; i < maxSpan; i++) {
-                  if (slotIdx + i < visibleSlots.length) {
-                    spannedCells.add(`${dia}|${visibleSlots[slotIdx + i]}`);
-                  }
-                }
+                const isFirst = a.slots[0] === slot;
 
                 return (
-                  <td
-                    key={cellKey}
-                    rowSpan={maxSpan}
-                    className="px-1 py-0.5 align-top border-b border-gray-800/50"
-                  >
-                    {startingHere.map((a) => (
-                      <div
-                        key={a.id}
-                        className={`px-2 py-1.5 rounded text-[10px] leading-tight mb-0.5 h-full ${
-                          a.esAIR ? "bg-amber-900/40 border border-amber-700/60 text-amber-200" :
-                          a.esSinDocente ? "bg-orange-900/40 border border-orange-700/60 text-orange-200" :
-                          a.tipoEspacio === "LABORATORIO" ? "bg-blue-900/30 border border-blue-800/60 text-blue-200" :
-                          a.tipoEspacio === "TALLER" ? "bg-purple-900/30 border border-purple-800/60 text-purple-200" :
-                          "bg-gray-800 border border-gray-700 text-gray-200"
-                        }`}
-                      >
-                        <div className="font-bold">{a.materiaCodigo}</div>
-                        <div className="truncate opacity-80">{a.materiaNombre}</div>
-                        {showDocente && <div className="text-[9px] opacity-70 mt-0.5 cursor-pointer hover:underline" onClick={() => onDocenteClick?.(a.docenteNombre)}>{"\u{1F464}"} {a.docenteNombre}</div>}
-                        {showCarrera && <div className="text-[9px] opacity-70 mt-0.5">{"\u{1F4DA}"} {a.carrera.split(" ").slice(0,3).join(" ")}</div>}
-                        <div className="text-[9px] opacity-60 mt-0.5">
-                          {!showCarrera && `\u{1F4CD} ${a.espacioCodigo}`}
-                          {showCarrera && `\u{1F464} ${a.docenteNombre?.split(" ").slice(0,2).join(" ")}`}
-                          {` \u00B7 ${a.slots[0]}-${calcEndTime(a.slots[a.slots.length-1])}`}
+                  <td key={cellKey} className="px-0.5 py-0.5 border-b border-gray-800/30">
+                    <div
+                      className={`px-1.5 py-0.5 text-[9px] leading-tight h-full flex flex-col justify-center ${
+                        isFirst ? "rounded-t" : ""
+                      } ${a.slots[a.slots.length - 1] === slot ? "rounded-b" : ""} ${
+                        a.esAIR ? "bg-amber-900/40 border-x border-amber-700/60 text-amber-200" :
+                        a.esSinDocente ? "bg-orange-900/40 border-x border-orange-700/60 text-orange-200" :
+                        a.tipoEspacio === "LABORATORIO" ? "bg-blue-900/30 border-x border-blue-800/60 text-blue-200" :
+                        a.tipoEspacio === "TALLER" ? "bg-purple-900/30 border-x border-purple-800/60 text-purple-200" :
+                        "bg-gray-800 border-x border-gray-700 text-gray-200"
+                      } ${isFirst ? "border-t" : ""} ${a.slots[a.slots.length - 1] === slot ? "border-b" : ""}`}
+                    >
+                      <div className="font-bold truncate">{a.materiaCodigo}</div>
+                      {isFirst && <div className="truncate opacity-80">{a.materiaNombre}</div>}
+                      {isFirst && showDocente && (
+                        <div className="opacity-70 truncate cursor-pointer hover:underline" onClick={() => onDocenteClick?.(a.docenteNombre)}>
+                          {a.docenteNombre}
                         </div>
-                      </div>
-                    ))}
+                      )}
+                      {isFirst && showCarrera && <div className="opacity-70 truncate">{a.carrera.split(" ").slice(0,3).join(" ")}</div>}
+                      {isFirst && (
+                        <div className="opacity-60 truncate">
+                          {a.espacioCodigo} {a.slots[0]}-{calcEndTime(a.slots[a.slots.length-1])}
+                        </div>
+                      )}
+                    </div>
                   </td>
                 );
               })}
