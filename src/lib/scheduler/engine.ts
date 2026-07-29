@@ -10,6 +10,7 @@ import type {
   Conflicto,
   Ventana,
   Dia,
+  Turno,
   TipoEspacio,
 } from "@/types/scheduler";
 import { SLOTS, TURNOS_SLOTS, DIAS } from "@/types/scheduler";
@@ -150,8 +151,10 @@ function construirUnidadesDeTrabajo(state: SchedulerState): UnidadTrabajo[] {
 
   const unidades: UnidadTrabajo[] = materiasActivas.map((materia) => {
     const tipo = materia.tipoAula;
+    // HC-07: Materias teóricas (AULA) max 3 horas continuas = 4 bloques de 45min
+    // Talleres y Labs usan configuración del usuario
     const maxPorSesion =
-      tipo === "AULA" ? 3 : tipo === "TALLER" ? config.maxPerSesionTaller : config.maxPerSesionLab;
+      tipo === "AULA" ? 4 : tipo === "TALLER" ? config.maxPerSesionTaller : config.maxPerSesionLab;
 
     const sesiones = repartirEnSesiones(materia.horasPorSemana, maxPorSesion);
     const dificultad = calcularDificultad(materia, state);
@@ -211,15 +214,32 @@ function intentarConBacktracking(
 ): Asignacion | null {
   const ordenDias = calcularOrdenDias(state, unidad, sesionIndex);
 
-  // Try 1: Greedy
+  // Try 1: Greedy with optimal day order
   let resultado = intentarAsignarSesion(state, unidad, nBloques, sesionIndex, ordenDias, false, false);
   if (resultado) return resultado;
 
-  // Tries 2+: Permutations
+  // Tries 2+: Smart permutations that PRESERVE same-day avoidance
+  // Only shuffle within the "unused days" portion, keeping used days at the end
+  const diasUsados = state.asignaciones
+    .filter((a) => a.materiaCodigo === unidad.materia.codigo && a.grupoCodigo === unidad.materia.grupoCodigo)
+    .map((a) => a.dia);
+
+  const diasNoUsados = ordenDias.filter((d) => !diasUsados.includes(d));
+  const diasYaUsados = ordenDias.filter((d) => diasUsados.includes(d));
+
   for (let i = 0; i < 5 && state.backtrackCount < state.config.maxBacktrack; i++) {
     state.backtrackCount++;
-    const permuted = shuffleArray([...ordenDias]);
+    // Permute only unused days; keep used days at end (last resort)
+    const permuted = [...shuffleArray([...diasNoUsados]), ...shuffleArray([...diasYaUsados])];
     resultado = intentarAsignarSesion(state, unidad, nBloques, sesionIndex, permuted, false, false);
+    if (resultado) return resultado;
+  }
+
+  // Fallback: Allow same-day (full random permutation) before resorting to AIR/SinDocente
+  for (let i = 0; i < 3 && state.backtrackCount < state.config.maxBacktrack; i++) {
+    state.backtrackCount++;
+    const fullPermuted = shuffleArray([...ordenDias]);
+    resultado = intentarAsignarSesion(state, unidad, nBloques, sesionIndex, fullPermuted, false, false);
     if (resultado) return resultado;
   }
 
@@ -263,6 +283,28 @@ function calcularOrdenDias(state: SchedulerState, unidad: UnidadTrabajo, sesionI
   const ordenado = cargaPorDia.map((c) => c.dia);
   const sinUsar = ordenado.filter((d) => !diasUsados.includes(d));
   const usados = ordenado.filter((d) => diasUsados.includes(d));
+
+  // SC-03: Prefer non-contiguous days when distribucionNoContigua is enabled
+  // E.g., if session 1 is on Monday, prefer Wednesday/Friday over Tuesday/Thursday
+  if (state.config.distribucionNoContigua && diasUsados.length > 0) {
+    const diaIndex: Record<Dia, number> = {
+      "Lunes": 0, "Martes": 1, "Miércoles": 2, "Jueves": 3, "Viernes": 4, "Sábado": 5
+    };
+    const usadosIdx = diasUsados.map((d) => diaIndex[d as Dia]);
+
+    // Separate non-contiguous and contiguous days among unused days
+    const noContiguos = sinUsar.filter((d) => {
+      const idx = diaIndex[d];
+      return !usadosIdx.some((ui) => Math.abs(idx - ui) === 1);
+    });
+    const contiguos = sinUsar.filter((d) => {
+      const idx = diaIndex[d];
+      return usadosIdx.some((ui) => Math.abs(idx - ui) === 1);
+    });
+
+    return [...noContiguos, ...contiguos, ...usados];
+  }
+
   return [...sinUsar, ...usados];
 }
 
@@ -423,15 +465,54 @@ function docentesCandidatos(state: SchedulerState, materia: MateriaCatalogo): Do
 
   if (candidatos.length === 0) return [];
 
-  // Prioritarios first, then sort by load (SC-02)
+  // Sort by soft constraint scoring: SC-01 (turno coherence) + SC-02 (weekly distribution) + priority
   candidatos.sort((a, b) => {
     const aPrio = state.config.docentesPrioritarios.includes(a.ci) ? 0 : 1;
     const bPrio = state.config.docentesPrioritarios.includes(b.ci) ? 0 : 1;
     if (aPrio !== bPrio) return aPrio - bPrio;
+
+    // SC-01: Prefer docentes whose existing assignments are in the SAME turno as this materia
+    const aCoherencia = calcularCoherenciaTurno(state, a.id, materia.turno);
+    const bCoherencia = calcularCoherenciaTurno(state, b.id, materia.turno);
+    if (aCoherencia !== bCoherencia) return bCoherencia - aCoherencia; // Higher coherence = better
+
+    // SC-02: Prefer docentes with more balanced weekly distribution (less concentrated)
+    const aDistribucion = calcularDistribucionSemanal(state, a.id);
+    const bDistribucion = calcularDistribucionSemanal(state, b.id);
+    if (aDistribucion !== bDistribucion) return aDistribucion - bDistribucion; // Lower = more balanced
+
+    // Tiebreaker: less total load first
     return countDocenteLoad(state, a.id) - countDocenteLoad(state, b.id);
   });
 
   return candidatos;
+}
+
+// SC-01: Returns a coherence score (0-1) for how much of the docente's existing load
+// is in the same turno as the target materia. 1 = all in same turno, 0 = all in different.
+function calcularCoherenciaTurno(state: SchedulerState, docenteId: number, turnoMateria: Turno): number {
+  const asigs = state.asignaciones.filter((a) => a.docenteId === docenteId);
+  if (asigs.length === 0) return 1; // No existing load = perfect coherence
+  const enMismoTurno = asigs.filter((a) => a.turno === turnoMateria).length;
+  return enMismoTurno / asigs.length;
+}
+
+// SC-02: Returns a concentration score. Higher = more concentrated in fewer days (worse).
+// Measures max slots in a single day / total slots. 0 = perfectly distributed.
+function calcularDistribucionSemanal(state: SchedulerState, docenteId: number): number {
+  const asigs = state.asignaciones.filter((a) => a.docenteId === docenteId);
+  if (asigs.length === 0) return 0;
+
+  const cargaPorDia = new Map<string, number>();
+  for (const a of asigs) {
+    const actual = cargaPorDia.get(a.dia) || 0;
+    cargaPorDia.set(a.dia, actual + a.slots.length);
+  }
+
+  const totalSlots = asigs.reduce((sum, a) => sum + a.slots.length, 0);
+  const maxEnUnDia = Math.max(...cargaPorDia.values());
+  // Ratio: 1 = all load in one day (worst), close to 0 = well distributed (best)
+  return maxEnUnDia / totalSlots;
 }
 
 function countDocenteLoad(state: SchedulerState, docenteId: number): number {
