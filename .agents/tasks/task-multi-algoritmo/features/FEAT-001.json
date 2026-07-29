@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Refactor scheduler engine into multi-algorithm architecture with 3 strategies: iterative (current), greedy with scoring, and genetic algorithm. Add algorithm type to SchedulerConfig and update the API route to dispatch accordingly.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In src/types/scheduler.ts: Add a new type `AlgoritmoScheduler = 'iterativo' | 'greedy' | 'genetico'`. Add `algoritmo: AlgoritmoScheduler` field to SchedulerConfig interface (default: 'iterativo'). Add it to DEFAULT_CONFIG. Also add genetic-specific config fields: `genetico_poblacion: number` (default 50), `genetico_generaciones: number` (default 100), `genetico_mutacion: number` (default 0.1).",
     "Refactor src/lib/scheduler/engine.ts: Extract all shared helper functions (normalizeStr, buildStudentGroupKey, inferirTurno, esPracticaLaboral, repartirEnSesiones, crearEspacioAIR, isValid, applyAssignment, getWindows, calcGap, orderWindowsByAdjacency, getDaysOrdered, and the work-unit building/sorting logic) into a new file src/lib/scheduler/shared.ts that exports them. Also export a type SchedulerState with the occupancy maps and helper closures.",
@@ -25,5 +25,5 @@
     "Run `npx tsc --noEmit` in project root and confirm 0 errors"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 3 algorithms share helpers from shared.ts. The SchedulerConfig now has required fields algoritmo, genetico_poblacion, genetico_generaciones, genetico_mutacion with defaults in DEFAULT_CONFIG. The scheduler page.tsx uses DEFAULT_CONFIG so it already has all new fields. Type check passes cleanly."
 }
