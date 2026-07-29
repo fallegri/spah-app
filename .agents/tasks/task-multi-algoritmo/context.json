@@ -1,0 +1,24 @@
+{
+  "project_type": "Next.js 16 full-stack app with Drizzle ORM + Neon DB (PostgreSQL)",
+  "language": "TypeScript",
+  "build_system": "pnpm + Next.js (no custom Makefile)",
+  "test_framework": "None (no test files found)",
+  "build_command": "npx tsc --noEmit",
+  "test_command": "npx tsc --noEmit",
+  "verification_instructions": "Run `npx tsc --noEmit` and confirm 0 errors. The project has no test suite beyond type checking.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pnpm install (already done, node_modules exists)",
+  "environment_constraints": "OPEN_INTERNET - full network access. DB is remote Neon PostgreSQL. No Docker needed.",
+  "contribution_requirements": "TypeScript must pass with 0 errors via `npx tsc --noEmit`",
+  "key_patterns": "Single scheduler engine in src/lib/scheduler/engine.ts exports ejecutarScheduler(). API route at src/app/api/scheduler/run/route.ts imports and calls it. UI at src/app/dashboard/scheduler/page.tsx is a client component that posts config+gestion to the API. Results displayed from DB at src/app/dashboard/resultados/. DB schema uses Drizzle ORM with pgTable. ejecuciones table tracks runs with activa boolean and gestion field. Config stored as JSONB.",
+  "relevant_files": [
+    "src/lib/scheduler/engine.ts",
+    "src/types/scheduler.ts",
+    "src/app/api/scheduler/run/route.ts",
+    "src/app/dashboard/scheduler/page.tsx",
+    "src/app/dashboard/resultados/page.tsx",
+    "src/app/dashboard/resultados/results-client.tsx",
+    "src/db/schema.ts"
+  ],
+  "directory_structure": "src/lib/scheduler/ - scheduler engine; src/types/ - shared types; src/app/api/scheduler/run/ - API route; src/app/dashboard/scheduler/ - execution UI; src/app/dashboard/resultados/ - results viewing; src/db/ - Drizzle schema and DB connection"
+}

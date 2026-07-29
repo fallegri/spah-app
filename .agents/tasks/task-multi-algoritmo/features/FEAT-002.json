@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Update the UI to allow algorithm selection and support multi-process/gestion management. Users can select which algorithm to use, see previous executions listed, and start new processes without clearing the DB.",
+  "status": "pending",
+  "steps": [
+    "Update src/app/dashboard/scheduler/page.tsx: Add algorithm selector (radio buttons or dropdown) for 'Iterativo', 'Greedy con Scoring', 'Genetico'. Show genetic-specific params (population size, generations, mutation rate) only when genetico is selected. Wire the selected algorithm into the config sent to the API.",
+    "Update src/app/dashboard/resultados/page.tsx: Instead of only showing the single active execution, fetch all executions and let the user pick which one to view. Show a list/table of past executions with: id, gestion, algorithm used, date, stats (assigned/conflicts). Keep the current detail view when an execution is selected.",
+    "Create src/app/api/scheduler/ejecuciones/route.ts: A GET endpoint that returns all ejecuciones ordered by createdAt desc, with basic stats (id, gestion, algoritmo, totalAsignadas, totalConflictos, duracionMs, createdAt, activa). This feeds the results page execution picker.",
+    "Update src/app/dashboard/resultados/results-client.tsx: Add an execution selector/list at the top. When the user picks a different execution, reload that execution's assignments and conflicts. The component should accept an optional ejecucionId prop or use URL params to navigate between executions.",
+    "Ensure the API route at src/app/api/scheduler/run/route.ts does NOT deactivate previous executions of same gestion anymore - each execution is independent. Just insert the new one as activa=true without deactivating others. (Or keep deactivation only for same-gestion if that's the multi-process intent - the user wants independent processes, so remove the deactivation step.)"
+  ],
+  "acceptance_criteria": [
+    "npx tsc --noEmit passes with 0 errors",
+    "The scheduler page shows algorithm selection with 3 options",
+    "Genetic-specific parameters appear only when genetic algorithm is selected",
+    "The results page lists all past executions and allows selecting any of them to view details",
+    "A new API endpoint GET /api/scheduler/ejecuciones returns all executions",
+    "Running the scheduler does not deactivate previous executions - all coexist independently"
+  ],
+  "verification": [
+    "Run `npx tsc --noEmit` in project root and confirm 0 errors"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

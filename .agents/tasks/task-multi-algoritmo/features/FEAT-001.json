@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Refactor scheduler engine into multi-algorithm architecture with 3 strategies: iterative (current), greedy with scoring, and genetic algorithm. Add algorithm type to SchedulerConfig and update the API route to dispatch accordingly.",
+  "status": "in_progress",
+  "steps": [
+    "In src/types/scheduler.ts: Add a new type `AlgoritmoScheduler = 'iterativo' | 'greedy' | 'genetico'`. Add `algoritmo: AlgoritmoScheduler` field to SchedulerConfig interface (default: 'iterativo'). Add it to DEFAULT_CONFIG. Also add genetic-specific config fields: `genetico_poblacion: number` (default 50), `genetico_generaciones: number` (default 100), `genetico_mutacion: number` (default 0.1).",
+    "Refactor src/lib/scheduler/engine.ts: Extract all shared helper functions (normalizeStr, buildStudentGroupKey, inferirTurno, esPracticaLaboral, repartirEnSesiones, crearEspacioAIR, isValid, applyAssignment, getWindows, calcGap, orderWindowsByAdjacency, getDaysOrdered, and the work-unit building/sorting logic) into a new file src/lib/scheduler/shared.ts that exports them. Also export a type SchedulerState with the occupancy maps and helper closures.",
+    "Keep the iterative algorithm in src/lib/scheduler/engine.ts but rename the internal logic to use the shared helpers from shared.ts. The exported function ejecutarScheduler() should remain here and act as a dispatcher that calls the appropriate algorithm based on config.algoritmo.",
+    "Create src/lib/scheduler/greedy.ts: Implement a greedy algorithm that for each session evaluates ALL valid (day, window, docente, espacio) combinations, scores them (penalizing gaps, AIR, SinDocente, rewarding adjacency, same type/school, lower daily load), and picks the best-scoring option. Must respect all the same hard constraints. Export function ejecutarGreedy() with same signature as ejecutarScheduler.",
+    "Create src/lib/scheduler/genetico.ts: Implement a genetic algorithm that: (a) generates an initial population of N solutions (each being a complete assignment using randomized greedy), (b) evaluates fitness (total assigned, penalties for AIR/SinDocente/gaps), (c) applies tournament selection, single-point crossover at the session level, and mutation (re-assign random sessions with new random valid slot), (d) runs for G generations, (e) returns the best individual. Export function ejecutarGenetico() with same signature.",
+    "Update src/app/api/scheduler/run/route.ts: Import the dispatcher from engine.ts (no change needed if ejecutarScheduler already dispatches based on config.algoritmo). Add 'algoritmo' field to ejecuciones insert so it gets saved. Update the DB schema if needed to store which algorithm was used.",
+    "In src/db/schema.ts: Add an `algoritmo` varchar column to the ejecuciones table (nullable, default 'iterativo') so we can track which algorithm produced each execution."
+  ],
+  "acceptance_criteria": [
+    "npx tsc --noEmit passes with 0 errors",
+    "src/lib/scheduler/engine.ts exports ejecutarScheduler and dispatches to iterativo/greedy/genetico based on config.algoritmo",
+    "src/lib/scheduler/greedy.ts exists and exports ejecutarGreedy implementing scoring-based selection",
+    "src/lib/scheduler/genetico.ts exists and exports ejecutarGenetico implementing population-based optimization",
+    "src/types/scheduler.ts has AlgoritmoScheduler type and config fields for algorithm selection and genetic params",
+    "All three algorithms respect the same constraint rules (no overlap, max 7/day, type/school match, capacity, min 2 periods)",
+    "The shared.ts file exports reusable helpers used by all three algorithms"
+  ],
+  "verification": [
+    "Run `npx tsc --noEmit` in project root and confirm 0 errors"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

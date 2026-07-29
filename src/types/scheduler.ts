@@ -90,7 +90,10 @@ export interface ReservaExterna {
 
 // ─── SCHEDULER TYPES ────────────────────────────────────────────────────────
 
+export type AlgoritmoScheduler = "iterativo" | "greedy" | "genetico";
+
 export interface SchedulerConfig {
+  algoritmo: AlgoritmoScheduler;
   maxPerSesionTaller: number;      // 4-8 periodos
   maxPerSesionLab: number;         // 4-8 periodos
   maxBacktrack: number;            // max permutations total
@@ -102,9 +105,13 @@ export interface SchedulerConfig {
   docentesPrioritarios: string[];  // CIs
   carrerasAProgramar: string[];    // empty = all
   distribucionNoContigua: boolean;
+  genetico_poblacion: number;      // population size for genetic algorithm
+  genetico_generaciones: number;   // number of generations
+  genetico_mutacion: number;       // mutation rate (0-1)
 }
 
 export const DEFAULT_CONFIG: SchedulerConfig = {
+  algoritmo: "iterativo",
   maxPerSesionTaller: 4,
   maxPerSesionLab: 4,
   maxBacktrack: 200,
@@ -116,6 +123,9 @@ export const DEFAULT_CONFIG: SchedulerConfig = {
   docentesPrioritarios: [],
   carrerasAProgramar: [],
   distribucionNoContigua: true,
+  genetico_poblacion: 50,
+  genetico_generaciones: 100,
+  genetico_mutacion: 0.1,
 };
 
 export interface UnidadTrabajo {

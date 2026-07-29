@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
       .values({
         usuarioId: parseInt((session.user as any).id),
         gestion,
+        algoritmo: config.algoritmo || "iterativo",
         configuracion: config,
         totalAsignadas: result.totalAsignadas,
         totalConflictos: result.totalConflictos,

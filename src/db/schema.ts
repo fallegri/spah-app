@@ -169,6 +169,7 @@ export const ejecuciones = pgTable("ejecuciones", {
     .references(() => usuarios.id)
     .notNull(),
   gestion: varchar("gestion", { length: 10 }).notNull(),
+  algoritmo: varchar("algoritmo", { length: 20 }).default("iterativo"),
   configuracion: jsonb("configuracion").notNull(), // All scheduler params
   totalAsignadas: integer("total_asignadas").default(0),
   totalConflictos: integer("total_conflictos").default(0),
