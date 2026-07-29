@@ -80,6 +80,17 @@ export function ejecutarScheduler(
   state.log.push(`[FASE 1] ${unidades.length} unidades de trabajo construidas`);
   state.log.push(`[INFO] Docentes: ${docentes.length}, Espacios: ${espacios.length}, Reservas: ${reservas.length}`);
 
+  // Log student groups for debugging
+  const studentGroups = new Map<string, string[]>();
+  for (const u of unidades) {
+    const sgk = `${u.materia.carrera}|${u.materia.semestre}|${u.materia.grupoCodigo}`;
+    if (!studentGroups.has(sgk)) studentGroups.set(sgk, []);
+    studentGroups.get(sgk)!.push(`${u.materia.codigo}(${u.sesiones.join("+")}h)`);
+  }
+  for (const [key, materias] of studentGroups) {
+    state.log.push(`[GRUPO] ${key} → ${materias.length} materias: ${materias.join(", ")}`);
+  }
+
   // Phase 2: Main scheduling loop
   for (const unidad of unidades) {
     for (let sesIdx = 0; sesIdx < unidad.sesiones.length; sesIdx++) {
@@ -235,7 +246,7 @@ function intentarConBacktracking(
 
 function calcularOrdenDias(state: SchedulerState, unidad: UnidadTrabajo, sesionIndex: number): Dia[] {
   const dias = DIAS.filter((d) => d !== "Sábado" || tieneSabadoHabilitado(state));
-  const studentKey = `${unidad.materia.carrera}|${unidad.materia.semestre}|${unidad.materia.grupoCodigo}`;
+  const studentKey = `${unidad.materia.carrera.trim().toUpperCase()}|${unidad.materia.semestre.trim().toUpperCase()}|${unidad.materia.grupoCodigo.trim().toUpperCase()}`;
 
   // Sort by least loaded day for this student group
   const cargaPorDia = dias.map((dia) => ({
@@ -271,7 +282,8 @@ function intentarAsignarSesion(
   const ventanas = generarVentanas(nBloques, materia.turno, state);
 
   // Student group key (carrera + semestre + grupoCodigo) — NOT including materia
-  const studentGroupKey = `${materia.carrera}|${materia.semestre}|${materia.grupoCodigo}`;
+  // Normalize to handle case differences in carrera names from Excel
+  const studentGroupKey = `${materia.carrera.trim().toUpperCase()}|${materia.semestre.trim().toUpperCase()}|${materia.grupoCodigo.trim().toUpperCase()}`;
 
   for (const dia of ordenDias) {
     if (dia === "Sábado" && !esVentanaSabadoValida(materia.turno, state)) continue;
@@ -281,10 +293,13 @@ function intentarAsignarSesion(
 
       // ═══ HC-05: Check student group overlap FIRST (cheapest check) ═══
       // Students in the same carrera+semestre+grupo cannot have two classes at the same time
-      const estudiantesConflicto = ventana.slots.some((slot) =>
+      const conflictSlot = ventana.slots.find((slot) =>
         state.estudiantesOcupados.has(`${studentGroupKey}|${dia}|${slot}`)
       );
-      if (estudiantesConflicto) continue;
+      if (conflictSlot) {
+        // This window is blocked for this student group
+        continue;
+      }
 
       // ═══ HC-08: Max 8 periods per day for student group ═══
       const cargaDiariaKey = `${studentGroupKey}|${dia}`;
@@ -372,7 +387,7 @@ function verificarDocenteGrupo(state: SchedulerState, docenteId: number, grupoCo
 function registrarAsignacion(state: SchedulerState, asig: Asignacion): void {
   state.asignaciones.push(asig);
 
-  const studentGroupKey = `${asig.carrera}|${asig.semestre}|${asig.grupoCodigo}`;
+  const studentGroupKey = `${asig.carrera.trim().toUpperCase()}|${asig.semestre.trim().toUpperCase()}|${asig.grupoCodigo.trim().toUpperCase()}`;
 
   for (const slot of asig.slots) {
     // Mark docente as occupied
