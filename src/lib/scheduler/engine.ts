@@ -289,6 +289,7 @@ export function ejecutarScheduler(
 
     for (let sesIdx = 0; sesIdx < unidad.sesiones.length; sesIdx++) {
       const nBloques = Math.max(unidad.sesiones[sesIdx], 2);
+      log.push(`[SESION] ${materia.codigo} (${materia.grupoCodigo}) sesion ${sesIdx}/${unidad.sesiones.length - 1}, bloques: ${nBloques}, turno: ${turno}`);
       const windows = getWindows(nBloques, turno);
       if (windows.length === 0) {
         conflictos.push({

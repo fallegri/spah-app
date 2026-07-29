@@ -6,6 +6,15 @@ import { Download, Calendar, AlertTriangle, Building, GraduationCap, Filter, Lis
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const SLOTS = ["07:45","08:30","09:15","10:00","10:45","11:30","12:15","13:00","13:45","14:30","15:15","16:00","16:45","17:30","18:15","19:00","19:45","20:30","21:15","22:00","22:45"];
 
+// Calculate end time: adds 45 minutes to a slot start time
+function calcEndTime(slotStart: string): string {
+  const [h, m] = slotStart.split(":").map(Number);
+  const totalMin = h * 60 + m + 45;
+  const eh = Math.floor(totalMin / 60);
+  const em = totalMin % 60;
+  return `${eh.toString().padStart(2, "0")}:${em.toString().padStart(2, "0")}`;
+}
+
 interface Asig {
   id: number; materiaCodigo: string; materiaNombre: string; grupoCodigo: string;
   carrera: string; semestre: string; docenteNombre: string; espacioCodigo: string;
@@ -328,7 +337,7 @@ function TimetableGrid({ asignaciones, showDocente = false, showCarrera = false,
                         <div className="text-[9px] opacity-60 mt-0.5">
                           {!showCarrera && `\u{1F4CD} ${a.espacioCodigo}`}
                           {showCarrera && `\u{1F464} ${a.docenteNombre?.split(" ").slice(0,2).join(" ")}`}
-                          {` \u00B7 ${a.slots[0]}-${a.slots[a.slots.length-1]}`}
+                          {` \u00B7 ${a.slots[0]}-${calcEndTime(a.slots[a.slots.length-1])}`}
                         </div>
                       </div>
                     ))}
@@ -372,7 +381,7 @@ function ListView({ asignaciones }: { asignaciones: Asig[] }) {
               <td className="px-3 py-2 text-gray-300 max-w-[130px] truncate">{a.docenteNombre}</td>
               <td className="px-3 py-2 text-gray-400 font-mono">{a.espacioCodigo}</td>
               <td className="px-3 py-2 text-gray-300">{a.dia}</td>
-              <td className="px-3 py-2 text-gray-400 font-mono">{a.slots[0]}-{a.slots[a.slots.length - 1]}</td>
+              <td className="px-3 py-2 text-gray-400 font-mono">{a.slots[0]}-{calcEndTime(a.slots[a.slots.length - 1])}</td>
               <td className="px-3 py-2">
                 {a.esAIR && <span className="px-1.5 py-0.5 bg-amber-900/30 text-amber-400 rounded text-[10px]">AIR</span>}
                 {a.esSinDocente && <span className="px-1.5 py-0.5 bg-orange-900/30 text-orange-400 rounded text-[10px] ml-1">Sin Doc</span>}
