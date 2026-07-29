@@ -58,7 +58,7 @@ export default async function ResultadosPage() {
       docenteNombre: a.docenteNombre || "Sin Docente",
       espacioCodigo: a.espacioCodigo || "AIR",
       dia: a.dia,
-      slots: a.slots as string[],
+      slots: (typeof a.slots === "string" ? JSON.parse(a.slots) : a.slots) as string[],
       turno: a.turno,
       tipoEspacio: a.tipoEspacio,
       esAIR: a.esAIR,
