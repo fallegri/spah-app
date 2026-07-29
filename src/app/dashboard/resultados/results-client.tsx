@@ -35,11 +35,13 @@ export function ResultsClient({ data }: Props) {
   const [tab, setTab] = useState<"semestre" | "espacio" | "lista" | "conflictos">("semestre");
   const [selectedCarrera, setSelectedCarrera] = useState("todas");
   const [selectedSemestre, setSelectedSemestre] = useState("todos");
+  const [selectedTurno, setSelectedTurno] = useState("todos");
   const [selectedEspacio, setSelectedEspacio] = useState("todos");
   const [docenteModal, setDocenteModal] = useState<string | null>(null);
 
   const carreras = [...new Set(asignaciones.map((a) => a.carrera))].sort();
   const semestres = [...new Set(asignaciones.map((a) => a.semestre))].sort();
+  const turnos = [...new Set(asignaciones.map((a) => a.turno))].sort();
   const espaciosUsados = [...new Set(asignaciones.map((a) => a.espacioCodigo))].sort();
 
   const handleExport = () => {
@@ -99,10 +101,13 @@ export function ResultsClient({ data }: Props) {
           asignaciones={asignaciones}
           carreras={carreras}
           semestres={semestres}
+          turnos={turnos}
           selectedCarrera={selectedCarrera}
           setSelectedCarrera={setSelectedCarrera}
           selectedSemestre={selectedSemestre}
           setSelectedSemestre={setSelectedSemestre}
+          selectedTurno={selectedTurno}
+          setSelectedTurno={setSelectedTurno}
           onDocenteClick={setDocenteModal}
         />
       )}
@@ -128,17 +133,19 @@ export function ResultsClient({ data }: Props) {
 // ─── VIEW: POR SEMESTRE ─────────────────────────────────────────────────────
 
 function SemestreView({
-  asignaciones, carreras, semestres, selectedCarrera, setSelectedCarrera, selectedSemestre, setSelectedSemestre, onDocenteClick,
+  asignaciones, carreras, semestres, turnos, selectedCarrera, setSelectedCarrera, selectedSemestre, setSelectedSemestre, selectedTurno, setSelectedTurno, onDocenteClick,
 }: {
-  asignaciones: Asig[]; carreras: string[]; semestres: string[];
+  asignaciones: Asig[]; carreras: string[]; semestres: string[]; turnos: string[];
   selectedCarrera: string; setSelectedCarrera: (v: string) => void;
   selectedSemestre: string; setSelectedSemestre: (v: string) => void;
+  selectedTurno: string; setSelectedTurno: (v: string) => void;
   onDocenteClick?: (nombre: string) => void;
 }) {
   // Filter
   let filtered = asignaciones;
   if (selectedCarrera !== "todas") filtered = filtered.filter((a) => a.carrera === selectedCarrera);
   if (selectedSemestre !== "todos") filtered = filtered.filter((a) => a.semestre === selectedSemestre);
+  if (selectedTurno !== "todos") filtered = filtered.filter((a) => a.turno === selectedTurno);
 
   // Group by carrera + semestre + grupoCodigo (each student group gets its own grid)
   // Normalize grupoCodigo to handle inconsistencies in Excel data
@@ -153,7 +160,7 @@ function SemestreView({
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <Filter className="w-4 h-4 text-gray-500" />
         <select value={selectedCarrera} onChange={(e) => setSelectedCarrera(e.target.value)} className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white">
           <option value="todas">Todas las carreras</option>
@@ -162,6 +169,10 @@ function SemestreView({
         <select value={selectedSemestre} onChange={(e) => setSelectedSemestre(e.target.value)} className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white">
           <option value="todos">Todos los semestres</option>
           {semestres.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={selectedTurno} onChange={(e) => setSelectedTurno(e.target.value)} className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white">
+          <option value="todos">Todos los turnos</option>
+          {turnos.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <span className="text-xs text-gray-500">{filtered.length} sesiones en {groups.size} grupos</span>
       </div>
@@ -247,11 +258,15 @@ function TimetableGrid({ asignaciones, showDocente = false, showCarrera = false,
   for (const a of asignaciones) {
     for (const s of a.slots) usedSlots.add(s);
   }
-  const visibleSlots = SLOTS.filter((s) => usedSlots.has(s));
-
-  if (visibleSlots.length === 0) {
+  // Include ALL slots between min and max used (no gaps in grid)
+  // This ensures rowSpan works correctly for multi-period sessions
+  const usedIndices = [...usedSlots].map((s) => SLOTS.indexOf(s)).filter((i) => i >= 0);
+  if (usedIndices.length === 0) {
     return <p className="text-xs text-gray-500 text-center py-4">Sin sesiones asignadas.</p>;
   }
+  const minIdx = Math.min(...usedIndices);
+  const maxIdx = Math.max(...usedIndices);
+  const visibleSlots = SLOTS.slice(minIdx, maxIdx + 1);
 
   // Build a lookup: for each (dia, slot) → the assignment that STARTS there
   const startingAt = new Map<string, Asig[]>();
