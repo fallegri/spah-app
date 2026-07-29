@@ -263,66 +263,56 @@ function esPracticaLaboral(materia: MateriaCatalogo): boolean {
  * 
  * REGLAS:
  * - Mínimo 2 periodos por sesión (no se permite 1 periodo solo)
- * - AULA (teórica): máximo 4 periodos (3h) por sesión. Si tiene 4h → 2+2
- * - TALLER/LAB: pueden tener 4+ periodos continuos (configurable)
+ * - AULA (teórica): máximo 3 periodos continuos. 4h→2+2, 5h→3+2, 6h→3+3
+ * - TALLER/LAB: máximo 4 periodos continuos. 5h→3+2, 6h→4+2 o 3+3, 7h→4+3
  * - Todas las horas deben programarse (no se pierden)
  */
 function repartirEnSesiones(horas: number, maxPorSesion: number, tipoAula: TipoEspacio | null): number[] {
   if (horas <= 0) return [];
 
-  // Caso especial: materias teóricas (AULA) - max 3 periodos por sesión para forzar 2+2 en vez de 4
-  // La regla dice: "si una materia tiene 4h teórica → 2+2, no pueden ir 4h teóricas seguidas"
-  const maxReal = tipoAula === "AULA" ? Math.min(maxPorSesion, 3) : maxPorSesion;
+  // AULA: max 3 periodos continuos (no pueden ir 4h teóricas seguidas)
+  // TALLER/LAB: max 4 periodos continuos (configurable pero default 4)
+  const maxReal = tipoAula === "AULA" ? 3 : Math.min(maxPorSesion, 4);
 
-  if (horas <= maxReal) {
-    // Si cabe en una sola sesión y tiene al menos 2 periodos, va completa
-    if (horas >= 2) return [horas];
-    // Si tiene exactamente 1h (raro pero posible), forzar a 2 no es posible - dejar como está
+  if (horas <= maxReal && horas >= 2) {
     return [horas];
   }
-
-  // Distribuir en múltiples sesiones equilibradas
-  const numSesiones = Math.ceil(horas / maxReal);
-  const base = Math.floor(horas / numSesiones);
-  const extra = horas % numSesiones;
-  const sesiones: number[] = [];
-
-  for (let i = 0; i < numSesiones; i++) {
-    sesiones.push(base + (i < extra ? 1 : 0));
+  if (horas === 1) {
+    return [1]; // Edge case: 1h subject (shouldn't happen per business rules)
   }
 
-  // Validar que ninguna sesión tenga menos de 2 periodos
-  // Si hay una sesión de 1, fusionarla con la anterior
+  // Calculate how many sessions we need
+  const numSesiones = Math.ceil(horas / maxReal);
+  
+  // Distribute as evenly as possible
+  const sesiones: number[] = [];
+  let remaining = horas;
+  for (let i = 0; i < numSesiones; i++) {
+    const slotsLeft = numSesiones - i;
+    const thisSession = Math.ceil(remaining / slotsLeft);
+    // Cap at maxReal
+    const capped = Math.min(thisSession, maxReal);
+    sesiones.push(capped);
+    remaining -= capped;
+  }
+
+  // Ensure minimum 2 per session: merge any session of 1 into another
   for (let i = sesiones.length - 1; i >= 0; i--) {
     if (sesiones[i] < 2 && sesiones.length > 1) {
-      if (i > 0) {
+      if (i > 0 && sesiones[i - 1] + sesiones[i] <= maxReal) {
         sesiones[i - 1] += sesiones[i];
         sesiones.splice(i, 1);
-      } else if (i < sesiones.length - 1) {
+      } else if (i < sesiones.length - 1 && sesiones[i + 1] + sesiones[i] <= maxReal) {
         sesiones[i + 1] += sesiones[i];
         sesiones.splice(i, 1);
       }
+      // If can't merge without exceeding max, leave as is (extremely rare)
     }
   }
 
-  // Re-validar que no exceda maxReal después de fusiones
-  const final: number[] = [];
-  for (const s of sesiones) {
-    if (s > maxReal) {
-      // Re-split this session
-      const sub = Math.ceil(s / maxReal);
-      const subBase = Math.floor(s / sub);
-      const subExtra = s % sub;
-      for (let j = 0; j < sub; j++) {
-        final.push(subBase + (j < subExtra ? 1 : 0));
-      }
-    } else {
-      final.push(s);
-    }
-  }
-
-  final.sort((a, b) => b - a);
-  return final;
+  // Sort descending (larger sessions first — easier to place early)
+  sesiones.sort((a, b) => b - a);
+  return sesiones;
 }
 
 // ─── PHASE 2: BACKTRACKING ──────────────────────────────────────────────────
@@ -483,6 +473,14 @@ function intentarAsignarSesion(
       const cargaDiariaKey = `${studentGroupKey}|${dia}`;
       const cargaActual = state.grupoCargaDiaria.get(cargaDiariaKey) || 0;
       if (cargaActual + nBloques > 7) continue;
+
+      // ═══ HC-PUENTE: Max 1 periodo de puente permitido ═══
+      // Si ya hay clases este día para este grupo, la nueva sesión no puede
+      // dejar un gap > 1 periodo respecto a las existentes
+      if (cargaActual > 0) {
+        const gap = calcularGapConExistentes(state, studentGroupKey, dia, ventana.slots);
+        if (gap > 1) continue; // Hard constraint: no bridges > 1 period
+      }
 
       for (const docente of docentesCand) {
         if (docente !== null) {
@@ -683,6 +681,33 @@ function generarVentanas(nBloques: number, turno: string, state: SchedulerState)
 // SC-BRIDGE: Orders windows to prefer those adjacent to existing group assignments on the same day.
 // This prevents "puentes" (free periods between classes) for the student group.
 // Priority: gap=0 (adjacent) > gap=1 (max allowed bridge) > gap>1 (strongly penalized)
+
+// Calculates the gap (in periods) between a proposed window and existing occupied slots for a group on a day
+function calcularGapConExistentes(state: SchedulerState, studentGroupKey: string, dia: Dia, proposedSlots: string[]): number {
+  // Find all currently occupied slot indices for this group on this day
+  const occupiedIndices: number[] = [];
+  for (let i = 0; i < SLOTS.length; i++) {
+    if (state.estudiantesOcupados.has(`${studentGroupKey}|${dia}|${SLOTS[i]}`)) {
+      occupiedIndices.push(i);
+    }
+  }
+  if (occupiedIndices.length === 0) return 0; // No existing classes, no gap
+
+  const proposedIndices = proposedSlots.map((s) => SLOTS.indexOf(s));
+  const propMin = Math.min(...proposedIndices);
+  const propMax = Math.max(...proposedIndices);
+  const occMin = Math.min(...occupiedIndices);
+  const occMax = Math.max(...occupiedIndices);
+
+  // Calculate gap between proposed and existing blocks
+  if (propMax < occMin) {
+    return occMin - propMax - 1;
+  } else if (propMin > occMax) {
+    return propMin - occMax - 1;
+  }
+  return 0; // Overlapping or adjacent
+}
+
 function ordenarVentanasSinPuentes(
   ventanas: Ventana[], state: SchedulerState, studentGroupKey: string, dia: Dia
 ): Ventana[] {

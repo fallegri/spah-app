@@ -105,8 +105,8 @@ export interface SchedulerConfig {
 }
 
 export const DEFAULT_CONFIG: SchedulerConfig = {
-  maxPerSesionTaller: 6,
-  maxPerSesionLab: 6,
+  maxPerSesionTaller: 4,
+  maxPerSesionLab: 4,
   maxBacktrack: 200,
   permitirAIR: true,
   permitirSinDocente: true,
